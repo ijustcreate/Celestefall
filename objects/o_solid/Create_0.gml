@@ -21,7 +21,7 @@
 	//then carry any riding actors
 	//Param: _xspd,_yspd (amount to move solid in current frame)
 	//Param: _collision_event (function to execute when a collision is detected (defaults to no action))
-	function move_x(_xspd, _collision_event = function() {}) {
+	move_x = function(_xspd, _collision_event = function() {}) {
 		xspd_remainder += _xspd;
 		var _move = round(xspd_remainder);
 	
@@ -62,7 +62,7 @@
 		}
 	}
 	
-	function move_y(_yspd, _collision_event = function() {}) {
+	move_y = function(_yspd, _collision_event = function() {}) {
 		yspd_remainder += _yspd;
 		var _move = round(yspd_remainder);
 	
