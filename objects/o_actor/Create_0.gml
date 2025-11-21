@@ -52,7 +52,7 @@
 	//pixel by pixel movement and collision checks, carrying fractional remainders to next frame
 	//Param: _xspd,_yspd (amount to move actor in current frame)
 	//Param: _collision_event (function to execute when a collision is detected (defaults to halting actor movement))
-	function move_x(_xspd, _collision_event = function() { collide_x(); }) {
+	move_x = function(_xspd, _collision_event = function() { collide_x(); }) {
 		xspd_remainder += _xspd;
 		var _move = floor(xspd_remainder);
 	
@@ -73,7 +73,7 @@
 		}
 	}
 
-	function move_y(_yspd, _collision_event = function() { collide_y(); }) {
+	move_y = function(_yspd, _collision_event = function() { collide_y(); }) {
 		yspd_remainder += _yspd;
 		var _move = floor(yspd_remainder);
 	
