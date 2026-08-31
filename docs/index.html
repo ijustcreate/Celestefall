@@ -5,23 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#363542">
   <title>Celestefall — Web Port</title>
-  <link rel="icon" href="assets/player-idle-0.png">
-  <link rel="stylesheet" href="styles.css?v=20260830-three-screen">
+  <link rel="icon" href="assets/ash/Ash.png">
+  <link rel="stylesheet" href="styles.css?v=20260830-bullet-age-ash">
 </head>
 <body>
   <main class="game-shell" aria-label="Celestefall web demo">
     <section class="stage-wrap">
       <canvas id="game" width="640" height="360" aria-label="Celestefall platforming demo" tabindex="0"></canvas>
       <div class="hud">
-        <div class="brand">CELESTEFALL <span>WEB PORT</span></div>
+        <div class="brand">CELESTEFALL <span>ASH WEB PORT</span></div>
         <div class="hud-actions">
           <button id="helpButton" class="icon-button" type="button" aria-label="Show controls">?</button>
           <button id="resetButton" class="icon-button" type="button" aria-label="Reset demo">↻</button>
         </div>
       </div>
       <section id="help" class="help-card" aria-live="polite">
-        <strong>MOVE. JUMP. HOLD ON.</strong>
-        <span>Arrows / WASD to move, look and duck · Space to jump · Shift to cling · Down + Jump to drop</span>
+        <strong>ASH IS BACK IN ACTION.</strong>
+        <span>Arrows / WASD to move, look and crouch · Space to jump · Shift to cling · Down + Jump to drop</span>
       </section>
     </section>
 
@@ -37,6 +37,8 @@
       </div>
     </section>
   </main>
-  <script src="game.js?v=20260830-three-screen"></script>
+  <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
+  <script src="ash-character.js?v=20260830-bullet-age-ash"></script>
+  <script src="game.js?v=20260830-bullet-age-ash"></script>
 </body>
 </html>

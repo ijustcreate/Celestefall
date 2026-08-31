@@ -11,9 +11,9 @@
   // One display tall and exactly three landscape camera widths wide.
   const WORLD = { width: 1920, height: 360 };
   const VIEW = { width: 640, height: 360 };
-  const PLAYER_HALF_W = 7;
-  const PLAYER_H = 16;
-  const PLAYER_CROUCH_H = 10;
+  const PLAYER_HALF_W = 9;
+  const PLAYER_H = 34;
+  const PLAYER_CROUCH_H = 21;
   const SPAWN = { x: 120, y: 328 };
 
   const imageSources = {
@@ -29,6 +29,7 @@
     ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`run${i}`, `assets/player-run-${i}.png`]))
   };
   const images = {};
+  const ash = window.AshCharacter ? new window.AshCharacter(ctx) : null;
 
   const fixed = [
     { x: 0, y: 0, w: 16, h: 360, kind: 'solid' },
@@ -351,6 +352,7 @@
     else if (p.lookingUp) p.animation = 'look';
     else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
+    ash?.update(STEP, p.animation);
 
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
@@ -468,10 +470,15 @@
 
   function drawPlayer() {
     const p = game.player;
-    const image = playerFrame();
-    if (!image) return;
     const x = Math.round((p.x - game.camera.x) * 2) / 2;
     const y = Math.round(p.y - game.camera.y);
+    if (ash?.ready) {
+      ash.draw(x, y, p.facing, p.stretch, p.squash);
+      return;
+    }
+
+    const image = playerFrame();
+    if (!image) return;
     ctx.save();
     ctx.translate(x, y);
     if (p.animation === 'crouch') ctx.scale(p.facing * p.stretch * 1.12, p.squash * .7);
@@ -680,6 +687,8 @@
       lookingUp: game.player.lookingUp,
       facing: game.player.facing,
       animation: game.player.animation,
+      character: ash?.ready ? 'Ash' : (ash?.failed ? 'Pirate fallback' : 'Ash loading'),
+      rigAnimation: ash?.currentAnimation || null,
       section: Math.min(3, Math.floor(game.player.x / VIEW.width) + 1)
     },
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
@@ -705,13 +714,19 @@
   }
 
   async function boot() {
-    await Promise.all(Object.entries(imageSources).map(([key, source]) => new Promise(resolve => {
+    const fallbackImages = Promise.all(Object.entries(imageSources).map(([key, source]) => new Promise(resolve => {
       const image = new Image();
       image.onload = () => { images[key] = image; resolve(); };
       image.onerror = () => resolve();
       image.src = source;
     })));
+    const ashRig = ash?.load().catch(error => {
+      ash.failed = true;
+      console.error('Ash character failed to load; using the pirate fallback.', error);
+    });
+    await Promise.all([fallbackImages, ashRig]);
     resetGame();
+    ash?.update(0, 'idle');
     render();
     requestAnimationFrame(frame);
     window.parent?.postMessage({ type: 'bcd:encore:ready' }, '*');
