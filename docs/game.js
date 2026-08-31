@@ -15,6 +15,7 @@
   const PLAYER_H = 34;
   const PLAYER_CROUCH_H = 21;
   const SPAWN = { x: 120, y: 328 };
+  const BOT_SPAWN = { x: 430, y: 328 };
 
   const imageSources = {
     background: 'assets/background.png',
@@ -30,6 +31,10 @@
   };
   const images = {};
   const ash = window.AshCharacter ? new window.AshCharacter(ctx) : null;
+  const botRig = window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, {
+    assetName: 'Player2',
+    basePath: 'assets/player2'
+  }) : null;
 
   const fixed = [
     { x: 0, y: 0, w: 16, h: 360, kind: 'solid' },
@@ -73,7 +78,8 @@
     right: false,
     up: false,
     down: false,
-    grab: false,
+    shootPressed: false,
+    dashPressed: false,
     jumpPressed: false,
     jumpHeld: false
   };
@@ -87,7 +93,10 @@
     camera: { x: 0, y: 0 },
     cloudX: 0,
     particles: [],
+    projectiles: [],
+    kills: 0,
     movers: makeMovers(),
+    bot: null,
     player: null
   };
 
@@ -108,6 +117,13 @@
       coyote: 0,
       jumpBuffer: 0,
       dropping: 0,
+      shootTimer: 0,
+      shootCooldown: 0,
+      dashTimer: 0,
+      dashCooldown: 0,
+      dashVX: 0,
+      dashVY: 0,
+      hitTimer: 0,
       animation: 'idle',
       animationTime: 0,
       squash: 1,
@@ -115,15 +131,38 @@
     };
   }
 
+  function freshBot(x = BOT_SPAWN.x, y = BOT_SPAWN.y) {
+    return {
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      facing: -1,
+      grounded: false,
+      health: 3,
+      maxHealth: 3,
+      alive: true,
+      respawnTimer: 0,
+      shootCooldown: 150,
+      shootTimer: 0,
+      hitTimer: 0,
+      animation: 'idle'
+    };
+  }
+
   function resetGame(countDeath = false) {
     if (countDeath) game.deaths += 1;
     game.player = freshPlayer();
+    game.bot = freshBot();
     game.movers = makeMovers();
     game.camera.x = innerHeight > innerWidth ? SPAWN.x - VIEW.width / 2 : 0;
     game.camera.y = 0;
     game.particles.length = 0;
+    game.projectiles.length = 0;
     input.jumpPressed = false;
     input.jumpHeld = false;
+    input.shootPressed = false;
+    input.dashPressed = false;
     vibrate(countDeath ? 30 : 12);
   }
 
@@ -259,6 +298,163 @@
     return target;
   }
 
+  function botRect(x = game.bot.x, y = game.bot.y) {
+    return { x: x - PLAYER_HALF_W, y: y - PLAYER_H, w: PLAYER_HALF_W * 2, h: PLAYER_H };
+  }
+
+  function botSolidAt(x, y) {
+    const rect = botRect(x, y);
+    return solids(false).find(surface => overlap(rect, surface)) || null;
+  }
+
+  function botStandingSurface() {
+    const bot = game.bot;
+    return fixed.concat(ledges, game.movers).find(surface =>
+      Math.abs(bot.y - surface.y) <= 2 &&
+      bot.x + PLAYER_HALF_W > surface.x &&
+      bot.x - PLAYER_HALF_W < surface.x + surface.w
+    ) || null;
+  }
+
+  function groundAtX(x) {
+    return fixed
+      .filter(surface => surface.w > 30 && x > surface.x + PLAYER_HALF_W && x < surface.x + surface.w - PLAYER_HALF_W)
+      .sort((a, b) => a.y - b.y)[0] || null;
+  }
+
+  function landingSurface(actor, nextY) {
+    return fixed.concat(ledges, game.movers).find(surface =>
+      actor.y <= surface.y + 1 &&
+      nextY >= surface.y &&
+      actor.x + PLAYER_HALF_W > surface.x &&
+      actor.x - PLAYER_HALF_W < surface.x + surface.w
+    ) || null;
+  }
+
+  function spawnProjectile(actor, owner) {
+    game.projectiles.push({
+      owner,
+      x: actor.x + actor.facing * 15,
+      y: actor.y - 22,
+      vx: actor.facing * (owner === 'player' ? 6.2 : 4.3),
+      life: 105
+    });
+    emitDust(actor.x + actor.facing * 12, actor.y - 21, 3);
+  }
+
+  function respawnBot() {
+    const desiredX = Math.max(48, Math.min(WORLD.width - 48, game.player.x + game.player.facing * 190));
+    const floor = groundAtX(desiredX) || groundAtX(BOT_SPAWN.x);
+    game.bot = freshBot(desiredX, floor?.y || BOT_SPAWN.y);
+  }
+
+  function updateBot() {
+    const bot = game.bot;
+    if (!bot.alive) {
+      bot.respawnTimer -= 1;
+      bot.animation = 'death';
+      botRig?.update(STEP, bot.animation);
+      if (bot.respawnTimer <= 0) respawnBot();
+      return;
+    }
+
+    bot.shootCooldown = Math.max(0, bot.shootCooldown - 1);
+    bot.shootTimer = Math.max(0, bot.shootTimer - 1);
+    bot.hitTimer = Math.max(0, bot.hitTimer - 1);
+    bot.grounded = botStandingSurface();
+
+    const distance = game.player.x - bot.x;
+    const direction = Math.abs(distance) > 78 ? Math.sign(distance) : 0;
+    if (direction) bot.facing = direction;
+
+    if (bot.hitTimer > 0) bot.vx *= .93;
+    else bot.vx = approach(bot.vx, direction * 1.35, direction ? .11 : .18);
+
+    if (bot.grounded && direction) {
+      const aheadX = bot.x + direction * 20;
+      const aheadGround = groundAtX(aheadX);
+      const blocked = botSolidAt(bot.x + direction * 3, bot.y);
+      if (blocked || !aheadGround || aheadGround.y < bot.y - 8) bot.vy = -6.2;
+    }
+
+    const nextX = bot.x + bot.vx;
+    if (!botSolidAt(nextX, bot.y)) bot.x = Math.max(24, Math.min(WORLD.width - 24, nextX));
+    else {
+      bot.vx = 0;
+      if (bot.grounded) bot.vy = -6.2;
+    }
+    if (overlap(botRect(), rectAt())) {
+      const side = Math.sign(distance) || -bot.facing || 1;
+      bot.x = game.player.x - side * 34;
+      bot.vx = -side * .7;
+    }
+
+    if (!bot.grounded || bot.vy < 0) bot.vy = Math.min(5.2, bot.vy + .36);
+    else bot.vy = 0;
+    const nextY = bot.y + bot.vy;
+    const landing = bot.vy >= 0 ? landingSurface(bot, nextY) : null;
+    if (landing) {
+      bot.y = landing.y;
+      bot.vy = 0;
+      bot.grounded = landing;
+    } else bot.y = nextY;
+
+    if (Math.abs(distance) > 90 && Math.abs(distance) < 380 && bot.shootCooldown <= 0) {
+      spawnProjectile(bot, 'bot');
+      bot.shootTimer = 15;
+      bot.shootCooldown = 150 + Math.floor(Math.random() * 55);
+    }
+
+    if (bot.y > WORLD.height + 45) {
+      respawnBot();
+      return;
+    }
+
+    if (bot.hitTimer > 0) bot.animation = 'hit';
+    else if (bot.shootTimer > 0) bot.animation = 'shoot';
+    else if (!bot.grounded) bot.animation = bot.vy < 0 ? 'jump' : 'fall';
+    else if (Math.abs(bot.vx) > .18) bot.animation = 'run';
+    else bot.animation = 'idle';
+    botRig?.update(STEP, bot.animation);
+  }
+
+  function updateProjectiles() {
+    const player = game.player;
+    const bot = game.bot;
+    for (const note of game.projectiles) {
+      note.x += note.vx;
+      note.life -= 1;
+      if (collidesSolid(note.x, note.y + PLAYER_H / 2, 2)) note.life = 0;
+
+      if (note.owner === 'player' && bot.alive && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, botRect())) {
+        note.life = 0;
+        bot.health -= 1;
+        bot.vx = Math.sign(note.vx) * 3.4;
+        bot.vy = -2.5;
+        bot.hitTimer = 16;
+        emitDust(bot.x, bot.y - 17, 9);
+        vibrate(18);
+        if (bot.health <= 0) {
+          bot.alive = false;
+          bot.respawnTimer = 105;
+          bot.animation = 'death';
+          game.kills += 1;
+          emitDust(bot.x, bot.y - 17, 18);
+        }
+      }
+
+      if (note.owner === 'bot' && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, rectAt())) {
+        note.life = 0;
+        player.vx = Math.sign(note.vx) * 2.8;
+        player.vy = -2.5;
+        player.hitTimer = 14;
+        emitDust(player.x, player.y - 17, 8);
+        vibrate([16, 24, 16]);
+      }
+    }
+    game.projectiles = game.projectiles.filter(note => note.life > 0 && note.x > 0 && note.x < WORLD.width);
+  }
+
   function update() {
     if (game.mode !== 'playing') return;
     const p = game.player;
@@ -267,11 +463,37 @@
     game.frame += 1;
     game.cloudX = (game.cloudX + .25) % 448;
     if (p.dropping > 0) p.dropping -= 1;
+    p.shootTimer = Math.max(0, p.shootTimer - 1);
+    p.shootCooldown = Math.max(0, p.shootCooldown - 1);
+    p.dashTimer = Math.max(0, p.dashTimer - 1);
+    p.dashCooldown = Math.max(0, p.dashCooldown - 1);
+    p.hitTimer = Math.max(0, p.hitTimer - 1);
 
     movePlatforms();
 
     const direction = Number(input.right) - Number(input.left);
     if (direction) p.facing = direction;
+
+    if (input.shootPressed && p.shootCooldown <= 0) {
+      spawnProjectile(p, 'player');
+      p.shootTimer = 15;
+      p.shootCooldown = 13;
+      vibrate(9);
+    }
+
+    if (input.dashPressed && p.dashCooldown <= 0) {
+      let dashX = direction;
+      let dashY = Number(input.down) - Number(input.up);
+      if (!dashX && !dashY) dashX = p.facing;
+      const length = Math.hypot(dashX, dashY) || 1;
+      p.dashVX = dashX / length * 6.6;
+      p.dashVY = dashY / length * 6.6;
+      p.dashTimer = 10;
+      p.dashCooldown = 40;
+      p.crouching = false;
+      emitDust(p.x, p.y, 10);
+      vibrate(15);
+    }
 
     p.grounded = standingSurface();
     if (p.grounded) p.coyote = 7;
@@ -294,10 +516,16 @@
     p.lookingUp = Boolean(input.up && p.grounded && !p.crouching && direction === 0);
 
     const wallSide = sideSurface(1) ? 1 : (sideSurface(-1) ? -1 : 0);
-    p.clinging = Boolean(input.grab && wallSide && !p.grounded);
+    // Clinging is automatic only when Ash is airborne and the player is
+    // actively pressing the joystick toward the wall.
+    p.clinging = Boolean(wallSide && !p.grounded && direction === wallSide && p.dashTimer <= 0);
     p.clingSide = p.clinging ? wallSide : 0;
 
-    if (p.clinging) {
+    if (p.dashTimer > 0) {
+      p.clinging = false;
+      p.vx = p.dashVX;
+      p.vy = p.dashVY;
+    } else if (p.clinging) {
       p.vx = 0;
       p.vy = .12;
       p.yRemainder = 0;
@@ -346,7 +574,10 @@
     p.squash += (1 - p.squash) * .2;
     p.stretch += (1 - p.stretch) * .2;
     p.animationTime += STEP;
-    if (p.clinging) p.animation = 'cling';
+    if (p.hitTimer > 0) p.animation = 'hit';
+    else if (p.dashTimer > 0) p.animation = 'dash';
+    else if (p.shootTimer > 0) p.animation = 'shoot';
+    else if (p.clinging) p.animation = 'cling';
     else if (!p.grounded) p.animation = p.vy < 0 ? 'jump' : 'fall';
     else if (p.crouching) p.animation = 'crouch';
     else if (p.lookingUp) p.animation = 'look';
@@ -356,11 +587,15 @@
 
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
+    updateBot();
+    updateProjectiles();
     updateCamera();
     input.jumpPressed = false;
+    input.shootPressed = false;
+    input.dashPressed = false;
   }
 
-  function updateCamera() {
+  function updateCamera(force = false) {
     const p = game.player;
     const lookAhead = p.facing * Math.min(46, Math.abs(p.vx) * 18);
     const portrait = innerHeight > innerWidth;
@@ -370,9 +605,20 @@
     const minX = portrait ? -VIEW.width / 2 + 24 : 0;
     const maxX = portrait ? WORLD.width - VIEW.width / 2 - 24 : WORLD.width - VIEW.width;
     const targetX = Math.max(minX, Math.min(maxX, p.x - VIEW.width / 2 + lookAhead));
-    game.camera.x += (targetX - game.camera.x) * .075;
+    if (force) game.camera.x = targetX;
+    else game.camera.x += (targetX - game.camera.x) * .075;
     game.camera.y = 0;
   }
+
+  function recenterAfterLayoutChange() {
+    requestAnimationFrame(() => {
+      updateCamera(true);
+      render();
+    });
+  }
+
+  window.addEventListener('resize', recenterAfterLayoutChange);
+  screen.orientation?.addEventListener?.('change', recenterAfterLayoutChange);
 
   function drawBackdrop() {
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -495,6 +741,54 @@
     }
   }
 
+  function drawBot() {
+    const bot = game.bot;
+    if (!bot || (!bot.alive && bot.respawnTimer < 75)) return;
+    const x = Math.round((bot.x - game.camera.x) * 2) / 2;
+    const y = Math.round(bot.y - game.camera.y);
+    if (x < -60 || x > canvas.width + 60) return;
+
+    if (botRig?.ready) botRig.draw(x, y, bot.facing, 1, 1);
+    else {
+      ctx.fillStyle = '#2267c9';
+      ctx.fillRect(x - 9, y - 27, 18, 27);
+      ctx.fillStyle = '#f4ecd7';
+      ctx.fillRect(x - 4, y - 22, 8, 5);
+    }
+
+    if (bot.alive) {
+      ctx.fillStyle = '#363542';
+      ctx.fillRect(x - 13, y - 43, 26, 7);
+      for (let index = 0; index < bot.maxHealth; index += 1) {
+        ctx.fillStyle = index < bot.health ? '#62b6ff' : '#5d586c';
+        ctx.fillRect(x - 10 + index * 8, y - 41, 6, 3);
+      }
+    }
+  }
+
+  function drawProjectiles() {
+    ctx.save();
+    ctx.font = 'bold 15px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const note of game.projectiles) {
+      const x = Math.round(note.x - game.camera.x);
+      const y = Math.round(note.y - game.camera.y);
+      ctx.strokeStyle = note.owner === 'player' ? '#fff3b0' : '#8ed7ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x - Math.sign(note.vx) * 13, y);
+      ctx.lineTo(x - Math.sign(note.vx) * 4, y);
+      ctx.stroke();
+      ctx.fillStyle = note.owner === 'player' ? '#ce146c' : '#2267c9';
+      ctx.strokeStyle = '#363542';
+      ctx.lineWidth = 2;
+      ctx.strokeText('♪', x, y);
+      ctx.fillText('♪', x, y);
+    }
+    ctx.restore();
+  }
+
   function drawParticles() {
     ctx.fillStyle = '#f4ecd7';
     for (const particle of game.particles) {
@@ -510,6 +804,8 @@
     drawBackdrop();
     drawPlatforms();
     drawParticles();
+    drawProjectiles();
+    drawBot();
     drawPlayer();
 
     if (game.mode === 'paused') {
@@ -538,8 +834,7 @@
     ['ArrowLeft', 'left'], ['KeyA', 'left'],
     ['ArrowRight', 'right'], ['KeyD', 'right'],
     ['ArrowUp', 'up'], ['KeyW', 'up'],
-    ['ArrowDown', 'down'], ['KeyS', 'down'],
-    ['ShiftLeft', 'grab'], ['ShiftRight', 'grab'], ['KeyB', 'grab']
+    ['ArrowDown', 'down'], ['KeyS', 'down']
   ]);
 
   window.addEventListener('keydown', event => {
@@ -550,6 +845,14 @@
     if (!event.repeat && event.code === 'Space') {
       input.jumpPressed = true;
       input.jumpHeld = true;
+      event.preventDefault();
+    }
+    if (!event.repeat && ['ShiftLeft', 'ShiftRight', 'KeyX', 'KeyJ'].includes(event.code)) {
+      input.shootPressed = true;
+      event.preventDefault();
+    }
+    if (!event.repeat && ['KeyB', 'KeyC', 'KeyK'].includes(event.code)) {
+      input.dashPressed = true;
       event.preventDefault();
     }
     if (!event.repeat && event.code === 'KeyR') resetGame();
@@ -567,7 +870,7 @@
   });
 
   window.addEventListener('blur', () => {
-    input.left = input.right = input.up = input.down = input.grab = input.jumpHeld = false;
+    input.left = input.right = input.up = input.down = input.jumpHeld = false;
   });
 
   const joystick = document.getElementById('joystick');
@@ -610,10 +913,9 @@
   joystick.addEventListener('pointerup', releaseJoystick);
   joystick.addEventListener('pointercancel', releaseJoystick);
 
-  function bindHeldButton(button, property) {
+  function bindTapButton(button, property) {
     const release = event => {
       if (button.hasPointerCapture?.(event.pointerId)) button.releasePointerCapture(event.pointerId);
-      input[property] = false;
       button.classList.remove('is-active');
     };
     button.addEventListener('pointerdown', event => {
@@ -627,9 +929,11 @@
     button.addEventListener('pointercancel', release);
   }
 
-  const grabButton = document.getElementById('grabButton');
+  const shootButton = document.getElementById('shootButton');
+  const dashButton = document.getElementById('dashButton');
   const jumpButton = document.getElementById('jumpButton');
-  bindHeldButton(grabButton, 'grab');
+  bindTapButton(shootButton, 'shootPressed');
+  bindTapButton(dashButton, 'dashPressed');
   jumpButton.addEventListener('pointerdown', event => {
     input.jumpPressed = true;
     input.jumpHeld = true;
@@ -689,10 +993,25 @@
       animation: game.player.animation,
       character: ash?.ready ? 'Ash' : (ash?.failed ? 'Pirate fallback' : 'Ash loading'),
       rigAnimation: ash?.currentAnimation || null,
+      shooting: game.player.shootTimer > 0,
+      dashing: game.player.dashTimer > 0,
+      dashCooldown: game.player.dashCooldown,
       section: Math.min(3, Math.floor(game.player.x / VIEW.width) + 1)
     },
+    bot: game.bot ? {
+      character: botRig?.ready ? 'Player2' : 'Programmatic fallback',
+      x: Math.round(game.bot.x),
+      y: Math.round(game.bot.y),
+      health: game.bot.health,
+      alive: game.bot.alive,
+      respawnTimer: game.bot.respawnTimer,
+      animation: game.bot.animation,
+      rigAnimation: botRig?.currentAnimation || null
+    } : null,
+    projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), direction: Math.sign(note.vx) })),
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
-    deaths: game.deaths
+    deaths: game.deaths,
+    botKnockouts: game.kills
   });
 
   window.advanceTime = milliseconds => {
@@ -714,6 +1033,12 @@
   }
 
   async function boot() {
+    // Start physics and controls immediately. The high-resolution Spine rigs
+    // can finish streaming without leaving the canvas or input loop inert.
+    resetGame();
+    render();
+    requestAnimationFrame(frame);
+
     const fallbackImages = Promise.all(Object.entries(imageSources).map(([key, source]) => new Promise(resolve => {
       const image = new Image();
       image.onload = () => { images[key] = image; resolve(); };
@@ -724,11 +1049,14 @@
       ash.failed = true;
       console.error('Ash character failed to load; using the pirate fallback.', error);
     });
-    await Promise.all([fallbackImages, ashRig]);
-    resetGame();
-    ash?.update(0, 'idle');
+    const blueRig = botRig?.load().catch(error => {
+      botRig.failed = true;
+      console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
+    });
+    await Promise.all([fallbackImages, ashRig, blueRig]);
+    ash?.update(0, game.player.animation);
+    botRig?.update(0, game.bot.animation);
     render();
-    requestAnimationFrame(frame);
     window.parent?.postMessage({ type: 'bcd:encore:ready' }, '*');
   }
 

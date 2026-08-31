@@ -8,12 +8,20 @@
     fall: { name: 'Jump_Fall', loop: true },
     cling: { name: 'Wall_Cling', loop: true },
     crouch: { name: 'Crouch_Idle', loop: true },
-    look: { name: '00_Setup_Aim_Up_Pistol', loop: true }
+    look: { name: '00_Setup_Aim_Up_Pistol', loop: true },
+    shoot: { name: 'Fire_Pistol', loop: false },
+    dash: { name: 'Dash_Pistol', loop: false },
+    hit: { name: 'Hit_Pistol', loop: false },
+    death: { name: 'Death', loop: false }
   };
 
-  class AshCharacter {
-    constructor(context) {
+  class BulletAgeCharacter {
+    constructor(context, options = {}) {
       this.context = context;
+      this.assetName = options.assetName || 'Ash';
+      this.basePath = options.basePath || 'assets/ash';
+      this.scale = options.scale || 0.086;
+      this.skin = options.skin || 'pistol_01';
       this.ready = false;
       this.failed = false;
       this.currentState = '';
@@ -23,13 +31,13 @@
       this.state = null;
     }
 
-    async load(basePath = 'assets/ash') {
+    async load() {
       if (!window.spine?.canvas) throw new Error('The Spine canvas runtime did not load.');
 
       const manager = new spine.canvas.AssetManager();
-      const jsonPath = `${basePath}/Ash.json`;
-      const atlasPath = `${basePath}/Ash.atlas`;
-      const texturePath = `${basePath}/Ash.png`;
+      const jsonPath = `${this.basePath}/${this.assetName}.json`;
+      const atlasPath = `${this.basePath}/${this.assetName}.atlas`;
+      const texturePath = `${this.basePath}/${this.assetName}.png`;
       manager.loadText(jsonPath);
       manager.loadText(atlasPath);
       manager.loadTexture(texturePath);
@@ -49,15 +57,15 @@
         check();
       });
 
-      const atlas = new spine.TextureAtlas(manager.get(atlasPath), path => manager.get(`${basePath}/${path}`));
+      const atlas = new spine.TextureAtlas(manager.get(atlasPath), path => manager.get(`${this.basePath}/${path}`));
       const parser = new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
       // Ash was authored at a much larger resolution than this 640×360 arena.
       // Scaling during JSON parsing keeps her physics-sized and preserves the
       // full-resolution artwork without shrinking the entire game canvas.
-      parser.scale = 0.086;
+      parser.scale = this.scale;
       const data = parser.readSkeletonData(manager.get(jsonPath));
       this.skeleton = new spine.Skeleton(data);
-      this.skeleton.setSkinByName('pistol_01');
+      this.skeleton.setSkinByName(this.skin);
       this.skeleton.setSlotsToSetupPose();
 
       const stateData = new spine.AnimationStateData(data);
@@ -100,5 +108,10 @@
     }
   }
 
-  window.AshCharacter = AshCharacter;
+  window.BulletAgeCharacter = BulletAgeCharacter;
+  window.AshCharacter = class AshCharacter extends BulletAgeCharacter {
+    constructor(context) {
+      super(context, { assetName: 'Ash', basePath: 'assets/ash' });
+    }
+  };
 })();

@@ -120,9 +120,15 @@ bennyfrancis
 ## Browser port
 
 This fork adds a dependency-free browser adaptation in [`docs/`](docs/). It
-ports the demo's pixel-step actor movement, jumping, wall cling, drop-through
-platforms, moving solids, and rider carrying to HTML Canvas, with responsive
-touch controls for phones. The original GameMaker project remains intact.
+ports the demo's pixel-step actor movement, jumping, automatic wall cling and
+wall jumping, drop-through platforms, moving solids, and rider carrying to
+HTML Canvas. The web version now uses the Bullet Age Ash rig, adds directional
+dashing, musical-note shooting with pushback, and one Player2 sparring bot with
+infinite respawns. Responsive phone controls provide a joystick plus Shoot,
+Dash, and Jump buttons. The original GameMaker project remains intact.
+
+Keyboard controls: arrows/WASD move, Space jumps, Shift/X/J shoots, and B/C/K
+dashes in the held direction.
 
 Play the fork: <https://ijustcreate.github.io/Celestefall/>
 

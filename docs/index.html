@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#363542">
   <title>Celestefall — Web Port</title>
   <link rel="icon" href="assets/ash/Ash.png">
-  <link rel="stylesheet" href="styles.css?v=20260830-bullet-age-ash">
+  <link rel="stylesheet" href="styles.css?v=20260830-combat-bot">
 </head>
 <body>
   <main class="game-shell" aria-label="Celestefall web demo">
@@ -21,7 +21,7 @@
       </div>
       <section id="help" class="help-card" aria-live="polite">
         <strong>ASH IS BACK IN ACTION.</strong>
-        <span>Arrows / WASD to move, look and crouch · Space to jump · Shift to cling · Down + Jump to drop</span>
+        <span>Move into walls to cling · A / Space jump · ♪ / Shift shoot · B / C dash</span>
       </section>
     </section>
 
@@ -32,13 +32,14 @@
       </div>
       <div class="touch-hint" aria-hidden="true">MOVE</div>
       <div class="action-cluster">
-        <button id="grabButton" class="action-button grab" type="button"><span>GRAB</span><b>G</b></button>
+        <button id="shootButton" class="action-button shoot" type="button"><span>SHOOT</span><b>♪</b></button>
+        <button id="dashButton" class="action-button dash" type="button"><span>DASH</span><b>B</b></button>
         <button id="jumpButton" class="action-button jump" type="button"><span>JUMP</span><b>A</b></button>
       </div>
     </section>
   </main>
   <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="ash-character.js?v=20260830-bullet-age-ash"></script>
-  <script src="game.js?v=20260830-bullet-age-ash"></script>
+  <script src="ash-character.js?v=20260830-combat-bot"></script>
+  <script src="game.js?v=20260830-combat-bot"></script>
 </body>
 </html>
