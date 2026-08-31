@@ -135,6 +135,7 @@
       meleeTimer: 0,
       meleeCooldown: 0,
       meleeConnected: false,
+      meleeDirection: 'forward',
       stompCooldown: 0,
       dashTimer: 0,
       dashCooldown: 0,
@@ -162,6 +163,10 @@
       respawnTimer: 0,
       shootCooldown: 150,
       shootTimer: 0,
+      meleeTimer: 0,
+      meleeCooldown: 70,
+      meleeConnected: false,
+      meleeDirection: 'forward',
       hitTimer: 0,
       animation: 'idle'
     };
@@ -385,6 +390,27 @@
     return true;
   }
 
+  function hitPlayer(knockbackX, knockbackY) {
+    const player = game.player;
+    player.vx = knockbackX;
+    player.vy = knockbackY;
+    player.hitTimer = 14;
+    emitDust(player.x, player.y - 17, 8);
+    vibrate([16, 24, 16]);
+  }
+
+  function meleeHitbox(actor, direction) {
+    const reach = 31;
+    if (direction === 'up') return { x: actor.x - 14, y: actor.y - 62, w: 28, h: 39 };
+    if (direction === 'down') return { x: actor.x - 14, y: actor.y - 9, w: 28, h: 38 };
+    return {
+      x: actor.facing > 0 ? actor.x + 5 : actor.x - reach - 5,
+      y: actor.y - 30,
+      w: reach,
+      h: 28
+    };
+  }
+
   function respawnBot() {
     const desiredX = Math.max(48, Math.min(WORLD.width - 48, game.player.x + game.player.facing * 190));
     const floor = groundAtX(desiredX) || groundAtX(BOT_SPAWN.x);
@@ -403,14 +429,26 @@
 
     bot.shootCooldown = Math.max(0, bot.shootCooldown - 1);
     bot.shootTimer = Math.max(0, bot.shootTimer - 1);
+    bot.meleeTimer = Math.max(0, bot.meleeTimer - 1);
+    bot.meleeCooldown = Math.max(0, bot.meleeCooldown - 1);
     bot.hitTimer = Math.max(0, bot.hitTimer - 1);
     bot.grounded = botStandingSurface();
 
     const distance = game.player.x - bot.x;
+    const verticalDistance = (game.player.y - PLAYER_H / 2) - (bot.y - PLAYER_H / 2);
     const direction = Math.abs(distance) > 78 ? Math.sign(distance) : 0;
     if (direction) bot.facing = direction;
 
+    if (bot.meleeCooldown <= 0 && Math.abs(distance) < 48 && Math.abs(verticalDistance) < 62) {
+      bot.meleeDirection = verticalDistance < -14 ? 'up' : (verticalDistance > 14 ? 'down' : 'forward');
+      if (Math.abs(distance) > 3) bot.facing = Math.sign(distance);
+      bot.meleeTimer = 15;
+      bot.meleeCooldown = 105 + Math.floor(Math.random() * 35);
+      bot.meleeConnected = false;
+    }
+
     if (bot.hitTimer > 0) bot.vx *= .93;
+    else if (bot.meleeTimer > 0) bot.vx = approach(bot.vx, 0, .28);
     else bot.vx = approach(bot.vx, direction * 1.35, direction ? .11 : .18);
 
     if (bot.grounded && direction) {
@@ -448,12 +486,22 @@
       bot.shootCooldown = 150 + Math.floor(Math.random() * 55);
     }
 
+    if (bot.meleeTimer >= 5 && bot.meleeTimer <= 11 && !bot.meleeConnected && overlap(meleeHitbox(bot, bot.meleeDirection), rectAt())) {
+      bot.meleeConnected = true;
+      const knockbackX = bot.meleeDirection === 'forward' ? bot.facing * 3.8 : Math.sign(game.player.x - bot.x) * 1.6;
+      const knockbackY = bot.meleeDirection === 'up' ? -4 : (bot.meleeDirection === 'down' ? 3.1 : -2.5);
+      hitPlayer(knockbackX, knockbackY);
+    }
+
     if (bot.y > WORLD.height + 45) {
       respawnBot();
       return;
     }
 
     if (bot.hitTimer > 0) bot.animation = 'hit';
+    else if (bot.meleeTimer > 0) {
+      bot.animation = bot.meleeDirection === 'up' ? 'meleeUp' : (bot.meleeDirection === 'down' ? 'meleeDown' : 'melee');
+    }
     else if (bot.shootTimer > 0) bot.animation = 'shoot';
     else if (!bot.grounded) bot.animation = bot.vy < 0 ? 'jump' : 'fall';
     else if (Math.abs(bot.vx) > .18) bot.animation = 'run';
@@ -477,11 +525,7 @@
 
       if (note.owner === 'bot' && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, rectAt())) {
         note.life = 0;
-        player.vx = Math.sign(note.vx) * 2.8;
-        player.vy = -2.5;
-        player.hitTimer = 14;
-        emitDust(player.x, player.y - 17, 8);
-        vibrate([16, 24, 16]);
+        hitPlayer(Math.sign(note.vx) * 2.8, -2.5);
       }
     }
     game.projectiles = game.projectiles.filter(note => note.life > 0 && note.x > 0 && note.x < WORLD.width && note.y > 0 && note.y < WORLD.height);
@@ -503,16 +547,12 @@
   function updateMeleeHit() {
     const p = game.player;
     if (p.meleeTimer < 5 || p.meleeTimer > 11 || p.meleeConnected || !game.bot.alive) return;
-    const reach = 31;
-    const hitbox = {
-      x: p.facing > 0 ? p.x + 5 : p.x - reach - 5,
-      y: p.y - 30,
-      w: reach,
-      h: 28
-    };
+    const hitbox = meleeHitbox(p, p.meleeDirection);
     if (overlap(hitbox, botRect())) {
       p.meleeConnected = true;
-      damageBot(1, p.facing * 4.2, -2.8, game.bot.x, game.bot.y - 15);
+      const knockbackX = p.meleeDirection === 'forward' ? p.facing * 4.2 : Math.sign(game.bot.x - p.x) * 1.8;
+      const knockbackY = p.meleeDirection === 'up' ? -4.2 : (p.meleeDirection === 'down' ? 3.4 : -2.8);
+      damageBot(1, knockbackX, knockbackY, game.bot.x, game.bot.y - 15);
     }
   }
 
@@ -580,6 +620,14 @@
     if (!input.shootHeld && !input.shootReleased) p.aiming = false;
 
     if (input.meleePressed && p.meleeCooldown <= 0) {
+      const verticalAim = Math.abs(input.aimAxisY) > .15
+        ? input.aimAxisY
+        : Number(input.down) - Number(input.up);
+      const horizontalAim = Math.abs(input.aimAxisX) > .15
+        ? input.aimAxisX
+        : Number(input.right) - Number(input.left);
+      p.meleeDirection = verticalAim < -.35 ? 'up' : (verticalAim > .35 ? 'down' : 'forward');
+      if (Math.abs(horizontalAim) > .2) p.facing = Math.sign(horizontalAim);
       p.meleeTimer = 15;
       p.meleeCooldown = 24;
       p.meleeConnected = false;
@@ -684,7 +732,9 @@
     p.animationTime += STEP;
     if (p.hitTimer > 0) p.animation = 'hit';
     else if (p.dashTimer > 0) p.animation = 'dash';
-    else if (p.meleeTimer > 0) p.animation = 'melee';
+    else if (p.meleeTimer > 0) {
+      p.animation = p.meleeDirection === 'up' ? 'meleeUp' : (p.meleeDirection === 'down' ? 'meleeDown' : 'melee');
+    }
     else if (p.shootTimer > 0) p.animation = 'shoot';
     else if (p.aiming && p.aimY < -.35) p.animation = 'look';
     else if (p.clinging) p.animation = 'cling';
@@ -1159,6 +1209,7 @@
       aiming: game.player.aiming,
       aim: { x: Number(game.player.aimX.toFixed(2)), y: Number(game.player.aimY.toFixed(2)) },
       melee: game.player.meleeTimer > 0,
+      meleeDirection: game.player.meleeDirection,
       dashing: game.player.dashTimer > 0,
       dashCooldown: game.player.dashCooldown,
       section: Math.min(3, Math.floor(game.player.x / VIEW.width) + 1)
@@ -1171,6 +1222,8 @@
       alive: game.bot.alive,
       respawnTimer: game.bot.respawnTimer,
       animation: game.bot.animation,
+      melee: game.bot.meleeTimer > 0,
+      meleeDirection: game.bot.meleeDirection,
       rigAnimation: botRig?.currentAnimation || null
     } : null,
     projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), vx: Number(note.vx.toFixed(2)), vy: Number(note.vy.toFixed(2)) })),

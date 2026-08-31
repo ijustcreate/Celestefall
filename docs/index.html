@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#363542">
   <title>Celestefall — Web Port</title>
   <link rel="icon" href="assets/ash/Ash.png">
-  <link rel="stylesheet" href="styles.css?v=20260831-control-layout">
+  <link rel="stylesheet" href="styles.css?v=20260831-directional-sword">
 </head>
 <body>
   <main class="game-shell" aria-label="Celestefall web demo">
@@ -21,7 +21,7 @@
       </div>
       <section id="help" class="help-card" aria-live="polite">
         <strong>ASH IS BACK IN ACTION.</strong>
-        <span>Move into walls to cling · Hold ♪ / Shift to aim, release to fire · A jump · B dash · ⚔ melee</span>
+        <span>Move into walls to cling · Hold ♪ / Shift to aim, release to fire · A jump · B dash · hold ↑ or ↓ + ⚔ for directional sword</span>
       </section>
     </section>
 
@@ -54,7 +54,7 @@
                 <option value="idle">Idle</option><option value="run">Run</option><option value="jump">Jump</option>
                 <option value="fall">Fall</option><option value="cling">Wall cling</option><option value="crouch">Crouch</option>
                 <option value="look">Aim up</option><option value="shoot">Shoot</option><option value="dash">Dash</option>
-                <option value="melee">Sword attack</option>
+                <option value="melee">Sword forward</option><option value="meleeUp">Sword up</option><option value="meleeDown">Sword down</option>
               </select>
             </label>
           </div>
@@ -81,8 +81,8 @@
     </section>
   </main>
   <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="ash-character.js?v=20260831-control-layout"></script>
-  <script src="skin-editor.js?v=20260831-control-layout"></script>
-  <script src="game.js?v=20260831-control-layout"></script>
+  <script src="ash-character.js?v=20260831-directional-sword"></script>
+  <script src="skin-editor.js?v=20260831-directional-sword"></script>
+  <script src="game.js?v=20260831-directional-sword"></script>
 </body>
 </html>
