@@ -15,6 +15,34 @@
     death: { name: 'Death', loop: false }
   };
 
+  const DEFAULT_PALETTE = Object.freeze({
+    head: '#ffffff',
+    body: '#ffffff',
+    gear: '#ffffff',
+    weapon: '#ffffff'
+  });
+
+  function normalizeHex(value) {
+    const candidate = String(value || '').trim();
+    return /^#[0-9a-f]{6}$/i.test(candidate) ? candidate.toLowerCase() : '#ffffff';
+  }
+
+  function colorChannels(value) {
+    const hex = normalizeHex(value);
+    return {
+      r: parseInt(hex.slice(1, 3), 16) / 255,
+      g: parseInt(hex.slice(3, 5), 16) / 255,
+      b: parseInt(hex.slice(5, 7), 16) / 255
+    };
+  }
+
+  function slotGroup(name) {
+    if (/head/i.test(name)) return 'head';
+    if (/gun|bullet|sword|weapon/i.test(name)) return 'weapon';
+    if (/pack/i.test(name)) return 'gear';
+    return 'body';
+  }
+
   class BulletAgeCharacter {
     constructor(context, options = {}) {
       this.context = context;
@@ -22,6 +50,7 @@
       this.basePath = options.basePath || 'assets/ash';
       this.scale = options.scale || 0.086;
       this.skin = options.skin || 'pistol_01';
+      this.palette = { ...DEFAULT_PALETTE, ...(options.palette || {}) };
       this.ready = false;
       this.failed = false;
       this.currentState = '';
@@ -67,6 +96,7 @@
       this.skeleton = new spine.Skeleton(data);
       this.skeleton.setSkinByName(this.skin);
       this.skeleton.setSlotsToSetupPose();
+      this.applyPalette(this.palette);
 
       const stateData = new spine.AnimationStateData(data);
       stateData.defaultMix = 0.09;
@@ -94,6 +124,41 @@
       this.setState(logicalState);
       this.state.update(delta);
       this.state.apply(this.skeleton);
+      this.applyPalette(this.palette);
+    }
+
+    listBaseSkins() {
+      return this.skeleton?.data?.skins?.map(skin => skin.name) || [];
+    }
+
+    setBaseSkin(name) {
+      if (!this.skeleton || !this.listBaseSkins().includes(name)) return false;
+      this.skin = name;
+      this.skeleton.setSkinByName(name);
+      this.skeleton.setSlotsToSetupPose();
+      this.applyPalette(this.palette);
+      return true;
+    }
+
+    applyPalette(palette = {}) {
+      this.palette = {
+        head: normalizeHex(palette.head || this.palette.head),
+        body: normalizeHex(palette.body || this.palette.body),
+        gear: normalizeHex(palette.gear || this.palette.gear),
+        weapon: normalizeHex(palette.weapon || this.palette.weapon)
+      };
+      if (!this.skeleton) return this.palette;
+      for (const slot of this.skeleton.slots) {
+        const channels = colorChannels(this.palette[slotGroup(slot.data.name)]);
+        slot.color.r = channels.r;
+        slot.color.g = channels.g;
+        slot.color.b = channels.b;
+      }
+      return { ...this.palette };
+    }
+
+    getAppearance() {
+      return { baseSkin: this.skin, palette: { ...this.palette } };
     }
 
     draw(x, y, facing, stretch = 1, squash = 1) {
@@ -109,6 +174,7 @@
   }
 
   window.BulletAgeCharacter = BulletAgeCharacter;
+  window.ASH_DEFAULT_PALETTE = DEFAULT_PALETTE;
   window.AshCharacter = class AshCharacter extends BulletAgeCharacter {
     constructor(context) {
       super(context, { assetName: 'Ash', basePath: 'assets/ash' });

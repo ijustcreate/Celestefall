@@ -31,6 +31,7 @@
   };
   const images = {};
   const ash = window.AshCharacter ? new window.AshCharacter(ctx) : null;
+  const skinEditor = window.AshSkinEditor && ash ? new window.AshSkinEditor(ash) : null;
   const botRig = window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, {
     assetName: 'Player2',
     basePath: 'assets/player2'
@@ -97,8 +98,12 @@
     kills: 0,
     movers: makeMovers(),
     bot: null,
-    player: null
+    player: null,
+    modeBeforeSkinEditor: 'playing'
   };
+
+  const localAdminPreview = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('admin') === '1';
+  skinEditor?.setAdmin(localAdminPreview);
 
   function freshPlayer() {
     return {
@@ -838,6 +843,7 @@
   ]);
 
   window.addEventListener('keydown', event => {
+    if (document.body.classList.contains('skin-editor-open')) return;
     if (keyMap.has(event.code)) {
       input[keyMap.get(event.code)] = true;
       event.preventDefault();
@@ -865,6 +871,7 @@
   });
 
   window.addEventListener('keyup', event => {
+    if (document.body.classList.contains('skin-editor-open')) return;
     if (keyMap.has(event.code)) input[keyMap.get(event.code)] = false;
     if (event.code === 'Space') input.jumpHeld = false;
   });
@@ -961,6 +968,15 @@
     help.classList.toggle('is-hidden');
   });
 
+  window.addEventListener('ash-skin-editor:open', () => {
+    game.modeBeforeSkinEditor = game.mode;
+    togglePause('paused');
+  });
+  window.addEventListener('ash-skin-editor:close', () => {
+    togglePause(game.modeBeforeSkinEditor || 'playing');
+    canvas.focus({ preventScroll: true });
+  });
+
   let helpTimer = 0;
   function hideHelpSoon() {
     clearTimeout(helpTimer);
@@ -968,10 +984,13 @@
   }
 
   window.addEventListener('message', event => {
+    const trustedParent = event.source === window.parent && event.origin === location.origin;
     if (event.data?.type === 'bcd:encore:init') {
+      if (!trustedParent) return;
       game.playerName = event.data.payload?.playerName || 'Climber';
+      skinEditor?.setAdmin(event.data.payload?.isAdmin === true);
     }
-    if (event.data?.type === 'bcd:encore:command' && event.data.payload?.command === 'close') togglePause('paused');
+    if (trustedParent && event.data?.type === 'bcd:encore:command' && event.data.payload?.command === 'close') togglePause('paused');
   });
 
   window.render_game_to_text = () => JSON.stringify({
@@ -1011,7 +1030,8 @@
     projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), direction: Math.sign(note.vx) })),
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
     deaths: game.deaths,
-    botKnockouts: game.kills
+    botKnockouts: game.kills,
+    skinEditor: skinEditor?.state?.() || null
   });
 
   window.advanceTime = milliseconds => {
@@ -1054,6 +1074,7 @@
       console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
     });
     await Promise.all([fallbackImages, ashRig, blueRig]);
+    skinEditor?.hydrateMainRig();
     ash?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
     render();

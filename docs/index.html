@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#363542">
   <title>Celestefall — Web Port</title>
   <link rel="icon" href="assets/ash/Ash.png">
-  <link rel="stylesheet" href="styles.css?v=20260830-combat-bot">
+  <link rel="stylesheet" href="styles.css?v=20260831-skin-studio">
 </head>
 <body>
   <main class="game-shell" aria-label="Celestefall web demo">
@@ -15,6 +15,7 @@
       <div class="hud">
         <div class="brand">CELESTEFALL <span>ASH WEB PORT</span></div>
         <div class="hud-actions">
+          <button id="skinEditorButton" class="icon-button skin-editor-button" type="button" aria-label="Open Ash skin editor" title="Ash Skin Studio" hidden>✦</button>
           <button id="helpButton" class="icon-button" type="button" aria-label="Show controls">?</button>
           <button id="resetButton" class="icon-button" type="button" aria-label="Reset demo">↻</button>
         </div>
@@ -37,9 +38,50 @@
         <button id="jumpButton" class="action-button jump" type="button"><span>JUMP</span><b>A</b></button>
       </div>
     </section>
+
+    <section id="skinEditor" class="skin-editor" role="dialog" aria-modal="true" aria-labelledby="skinEditorTitle" hidden>
+      <button class="skin-editor-scrim" type="button" aria-label="Close Ash skin editor" data-skin-close></button>
+      <div class="skin-editor-panel">
+        <header class="skin-editor-header">
+          <div><span>ADMIN WORKSHOP</span><h1 id="skinEditorTitle">Ash Skin Studio</h1></div>
+          <button class="skin-editor-close" type="button" aria-label="Close Ash skin editor" data-skin-close>×</button>
+        </header>
+        <div class="skin-editor-content">
+          <div class="skin-preview-wrap">
+            <canvas id="skinPreview" width="300" height="300" aria-label="Animated Ash skin preview"></canvas>
+            <label>Preview animation
+              <select data-skin-pose>
+                <option value="idle">Idle</option><option value="run">Run</option><option value="jump">Jump</option>
+                <option value="fall">Fall</option><option value="cling">Wall cling</option><option value="crouch">Crouch</option>
+                <option value="look">Aim up</option><option value="shoot">Shoot</option><option value="dash">Dash</option>
+              </select>
+            </label>
+          </div>
+          <div class="skin-editor-fields">
+            <label>Skin library<select data-skin-library></select></label>
+            <label>Skin name<input type="text" maxlength="32" placeholder="Midnight Ash" data-skin-name></label>
+            <label>Base equipment<select data-skin-base><option value="pistol_01">pistol 01</option></select></label>
+            <fieldset>
+              <legend>Color layers</legend>
+              <label><span>Head + hood</span><input type="color" value="#ffffff" data-skin-color="head"></label>
+              <label><span>Body + arms</span><input type="color" value="#ffffff" data-skin-color="body"></label>
+              <label><span>Pack + gear</span><input type="color" value="#ffffff" data-skin-color="gear"></label>
+              <label><span>Weapon</span><input type="color" value="#ffffff" data-skin-color="weapon"></label>
+            </fieldset>
+            <p class="skin-editor-status" data-skin-status aria-live="polite"></p>
+            <div class="skin-editor-actions">
+              <button type="button" data-skin-new>New</button>
+              <button type="button" data-skin-delete disabled>Delete</button>
+              <button class="skin-save" type="button" data-skin-save>Save skin</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
   <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="ash-character.js?v=20260830-combat-bot"></script>
-  <script src="game.js?v=20260830-combat-bot"></script>
+  <script src="ash-character.js?v=20260831-skin-studio"></script>
+  <script src="skin-editor.js?v=20260831-skin-studio"></script>
+  <script src="game.js?v=20260831-skin-studio"></script>
 </body>
 </html>

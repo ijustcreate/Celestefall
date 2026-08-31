@@ -130,6 +130,12 @@ Dash, and Jump buttons. The original GameMaker project remains intact.
 Keyboard controls: arrows/WASD move, Space jumps, Shift/X/J shoots, and B/C/K
 dashes in the held direction.
 
+BCD administrator sessions also unlock the top-right **Ash Skin Studio**. It
+can combine any of Ash's included Spine equipment skins with independent
+head/hood, body, gear, and weapon tints; preview nine authored animation
+states; and name, save, reapply, or delete custom variants. Custom variants
+are stored on the installed device and the selected skin is restored on load.
+
 Play the fork: <https://ijustcreate.github.io/Celestefall/>
 
 
