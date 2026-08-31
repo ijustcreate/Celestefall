@@ -25,6 +25,8 @@
     weapon: '#ffffff'
   });
 
+  const DRAWN_SWORD_STATES = new Set(['melee', 'meleeUp', 'meleeDown']);
+
   function normalizeHex(value) {
     const candidate = String(value || '').trim();
     return /^#[0-9a-f]{6}$/i.test(candidate) ? candidate.toLowerCase() : '#ffffff';
@@ -127,6 +129,12 @@
       this.setState(logicalState);
       this.state.update(delta);
       this.state.apply(this.skeleton);
+      // Sword clips do not key the Gun slot, so Spine's short crossfade can
+      // otherwise leave the previously drawn pistol visible over the slash.
+      // Keep the weapon silhouette unambiguous for the full melee state.
+      if (DRAWN_SWORD_STATES.has(logicalState)) {
+        this.skeleton.findSlot('Gun')?.setAttachment(null);
+      }
       this.applyPalette(this.palette);
     }
 

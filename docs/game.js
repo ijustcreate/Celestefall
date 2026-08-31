@@ -18,6 +18,12 @@
   const PLAYER_CROUCH_H = 21;
   const SPAWN = { x: 120, y: 328 };
   const BOT_SPAWN = { x: 430, y: 328 };
+  const MELEE_TIMING = Object.freeze({
+    forward: { duration: 16, hitStart: 4, hitEnd: 11 },
+    // The authored upward slash effect begins at 0.17s and runs until 0.33s.
+    up: { duration: 28, hitStart: 10, hitEnd: 20 },
+    down: { duration: 24, hitStart: 4, hitEnd: 18 }
+  });
 
   const imageSources = {
     background: 'assets/background.png',
@@ -133,6 +139,7 @@
       aimX: 1,
       aimY: 0,
       meleeTimer: 0,
+      meleeDuration: 0,
       meleeCooldown: 0,
       meleeConnected: false,
       meleeDirection: 'forward',
@@ -164,9 +171,11 @@
       shootCooldown: 150,
       shootTimer: 0,
       meleeTimer: 0,
+      meleeDuration: 0,
       meleeCooldown: 70,
       meleeConnected: false,
       meleeDirection: 'forward',
+      antiAirCooldown: 90,
       hitTimer: 0,
       animation: 'idle'
     };
@@ -411,6 +420,20 @@
     };
   }
 
+  function beginMelee(actor, direction) {
+    const timing = MELEE_TIMING[direction] || MELEE_TIMING.forward;
+    actor.meleeDirection = direction;
+    actor.meleeDuration = timing.duration;
+    actor.meleeTimer = timing.duration;
+    actor.meleeConnected = false;
+  }
+
+  function meleeCanHit(actor) {
+    const timing = MELEE_TIMING[actor.meleeDirection] || MELEE_TIMING.forward;
+    const elapsed = actor.meleeDuration - actor.meleeTimer;
+    return elapsed >= timing.hitStart && elapsed <= timing.hitEnd;
+  }
+
   function respawnBot() {
     const desiredX = Math.max(48, Math.min(WORLD.width - 48, game.player.x + game.player.facing * 190));
     const floor = groundAtX(desiredX) || groundAtX(BOT_SPAWN.x);
@@ -431,6 +454,7 @@
     bot.shootTimer = Math.max(0, bot.shootTimer - 1);
     bot.meleeTimer = Math.max(0, bot.meleeTimer - 1);
     bot.meleeCooldown = Math.max(0, bot.meleeCooldown - 1);
+    bot.antiAirCooldown = Math.max(0, bot.antiAirCooldown - 1);
     bot.hitTimer = Math.max(0, bot.hitTimer - 1);
     bot.grounded = botStandingSurface();
 
@@ -440,11 +464,24 @@
     if (direction) bot.facing = direction;
 
     if (bot.meleeCooldown <= 0 && Math.abs(distance) < 48 && Math.abs(verticalDistance) < 62) {
-      bot.meleeDirection = verticalDistance < -14 ? 'up' : (verticalDistance > 14 ? 'down' : 'forward');
-      if (Math.abs(distance) > 3) bot.facing = Math.sign(distance);
-      bot.meleeTimer = 15;
-      bot.meleeCooldown = 105 + Math.floor(Math.random() * 35);
-      bot.meleeConnected = false;
+      const requestedDirection = verticalDistance < -14 ? 'up' : (verticalDistance > 14 ? 'down' : 'forward');
+      let commit = true;
+      if (requestedDirection === 'up') {
+        // An overhead player creates one anti-air decision, not a new dice
+        // roll every frame. The bot sometimes contests a stomp, but most
+        // descending attempts remain a viable way to damage it.
+        commit = false;
+        if (bot.antiAirCooldown <= 0) {
+          bot.antiAirCooldown = 72 + Math.floor(Math.random() * 30);
+          const defenseChance = game.player.vy > .5 ? .28 : .42;
+          commit = Math.random() < defenseChance;
+        }
+      }
+      if (commit) {
+        if (Math.abs(distance) > 3) bot.facing = Math.sign(distance);
+        beginMelee(bot, requestedDirection);
+        bot.meleeCooldown = 105 + Math.floor(Math.random() * 35);
+      }
     }
 
     if (bot.hitTimer > 0) bot.vx *= .93;
@@ -486,7 +523,7 @@
       bot.shootCooldown = 150 + Math.floor(Math.random() * 55);
     }
 
-    if (bot.meleeTimer >= 5 && bot.meleeTimer <= 11 && !bot.meleeConnected && overlap(meleeHitbox(bot, bot.meleeDirection), rectAt())) {
+    if (meleeCanHit(bot) && !bot.meleeConnected && overlap(meleeHitbox(bot, bot.meleeDirection), rectAt())) {
       bot.meleeConnected = true;
       const knockbackX = bot.meleeDirection === 'forward' ? bot.facing * 3.8 : Math.sign(game.player.x - bot.x) * 1.6;
       const knockbackY = bot.meleeDirection === 'up' ? -4 : (bot.meleeDirection === 'down' ? 3.1 : -2.5);
@@ -546,7 +583,7 @@
 
   function updateMeleeHit() {
     const p = game.player;
-    if (p.meleeTimer < 5 || p.meleeTimer > 11 || p.meleeConnected || !game.bot.alive) return;
+    if (!meleeCanHit(p) || p.meleeConnected || !game.bot.alive) return;
     const hitbox = meleeHitbox(p, p.meleeDirection);
     if (overlap(hitbox, botRect())) {
       p.meleeConnected = true;
@@ -626,11 +663,10 @@
       const horizontalAim = Math.abs(input.aimAxisX) > .15
         ? input.aimAxisX
         : Number(input.right) - Number(input.left);
-      p.meleeDirection = verticalAim < -.35 ? 'up' : (verticalAim > .35 ? 'down' : 'forward');
+      const meleeDirection = verticalAim < -.35 ? 'up' : (verticalAim > .35 ? 'down' : 'forward');
       if (Math.abs(horizontalAim) > .2) p.facing = Math.sign(horizontalAim);
-      p.meleeTimer = 15;
+      beginMelee(p, meleeDirection);
       p.meleeCooldown = 24;
-      p.meleeConnected = false;
       vibrate(11);
     }
 
