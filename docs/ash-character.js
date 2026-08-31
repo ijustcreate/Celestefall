@@ -10,6 +10,7 @@
     crouch: { name: 'Crouch_Idle', loop: true },
     look: { name: '00_Setup_Aim_Up_Pistol', loop: true },
     shoot: { name: 'Fire_Pistol', loop: false },
+    melee: { name: 'Sword_Attack_01', loop: false },
     dash: { name: 'Dash_Pistol', loop: false },
     hit: { name: 'Hit_Pistol', loop: false },
     death: { name: 'Death', loop: false }

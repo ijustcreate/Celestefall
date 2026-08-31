@@ -79,7 +79,11 @@
     right: false,
     up: false,
     down: false,
-    shootPressed: false,
+    shootHeld: false,
+    shootReleased: false,
+    aimAxisX: 0,
+    aimAxisY: 0,
+    meleePressed: false,
     dashPressed: false,
     jumpPressed: false,
     jumpHeld: false
@@ -98,8 +102,7 @@
     kills: 0,
     movers: makeMovers(),
     bot: null,
-    player: null,
-    modeBeforeSkinEditor: 'playing'
+    player: null
   };
 
   const localAdminPreview = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('admin') === '1';
@@ -124,6 +127,13 @@
       dropping: 0,
       shootTimer: 0,
       shootCooldown: 0,
+      aiming: false,
+      aimX: 1,
+      aimY: 0,
+      meleeTimer: 0,
+      meleeCooldown: 0,
+      meleeConnected: false,
+      stompCooldown: 0,
       dashTimer: 0,
       dashCooldown: 0,
       dashVX: 0,
@@ -166,7 +176,10 @@
     game.projectiles.length = 0;
     input.jumpPressed = false;
     input.jumpHeld = false;
-    input.shootPressed = false;
+    input.shootHeld = false;
+    input.shootReleased = false;
+    input.aimAxisX = input.aimAxisY = 0;
+    input.meleePressed = false;
     input.dashPressed = false;
     vibrate(countDeath ? 30 : 12);
   }
@@ -336,15 +349,38 @@
     ) || null;
   }
 
-  function spawnProjectile(actor, owner) {
+  function spawnProjectile(actor, owner, aimX = actor.facing, aimY = 0) {
+    const length = Math.hypot(aimX, aimY) || 1;
+    const directionX = aimX / length;
+    const directionY = aimY / length;
+    const speed = owner === 'player' ? 6.2 : 4.3;
     game.projectiles.push({
       owner,
-      x: actor.x + actor.facing * 15,
-      y: actor.y - 22,
-      vx: actor.facing * (owner === 'player' ? 6.2 : 4.3),
+      x: actor.x + directionX * 15,
+      y: actor.y - 22 + directionY * 8,
+      vx: directionX * speed,
+      vy: directionY * speed,
       life: 105
     });
-    emitDust(actor.x + actor.facing * 12, actor.y - 21, 3);
+    emitDust(actor.x + directionX * 12, actor.y - 21 + directionY * 8, 3);
+  }
+
+  function damageBot(amount, knockbackX, knockbackY, effectX = game.bot.x, effectY = game.bot.y - 17) {
+    const bot = game.bot;
+    if (!bot.alive) return false;
+    bot.health -= amount;
+    bot.vx = knockbackX;
+    bot.vy = knockbackY;
+    bot.hitTimer = 16;
+    emitDust(effectX, effectY, bot.health > 0 ? 9 : 18);
+    vibrate(bot.health > 0 ? 18 : [24, 24, 32]);
+    if (bot.health <= 0) {
+      bot.alive = false;
+      bot.respawnTimer = 105;
+      bot.animation = 'death';
+      game.kills += 1;
+    }
+    return true;
   }
 
   function respawnBot() {
@@ -428,24 +464,13 @@
     const bot = game.bot;
     for (const note of game.projectiles) {
       note.x += note.vx;
+      note.y += note.vy;
       note.life -= 1;
       if (collidesSolid(note.x, note.y + PLAYER_H / 2, 2)) note.life = 0;
 
       if (note.owner === 'player' && bot.alive && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, botRect())) {
         note.life = 0;
-        bot.health -= 1;
-        bot.vx = Math.sign(note.vx) * 3.4;
-        bot.vy = -2.5;
-        bot.hitTimer = 16;
-        emitDust(bot.x, bot.y - 17, 9);
-        vibrate(18);
-        if (bot.health <= 0) {
-          bot.alive = false;
-          bot.respawnTimer = 105;
-          bot.animation = 'death';
-          game.kills += 1;
-          emitDust(bot.x, bot.y - 17, 18);
-        }
+        damageBot(1, Math.sign(note.vx || game.player.facing) * 3.4, -2.5);
       }
 
       if (note.owner === 'bot' && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, rectAt())) {
@@ -457,7 +482,54 @@
         vibrate([16, 24, 16]);
       }
     }
-    game.projectiles = game.projectiles.filter(note => note.life > 0 && note.x > 0 && note.x < WORLD.width);
+    game.projectiles = game.projectiles.filter(note => note.life > 0 && note.x > 0 && note.x < WORLD.width && note.y > 0 && note.y < WORLD.height);
+  }
+
+  function aimVector() {
+    const p = game.player;
+    let x = input.aimAxisX;
+    let y = input.aimAxisY;
+    if (Math.hypot(x, y) < .12) {
+      x = Number(input.right) - Number(input.left);
+      y = Number(input.down) - Number(input.up);
+    }
+    if (Math.hypot(x, y) < .12) return { x: p.aimX || p.facing, y: p.aimY || 0 };
+    const length = Math.hypot(x, y);
+    return { x: x / length, y: y / length };
+  }
+
+  function updateMeleeHit() {
+    const p = game.player;
+    if (p.meleeTimer < 5 || p.meleeTimer > 11 || p.meleeConnected || !game.bot.alive) return;
+    const reach = 31;
+    const hitbox = {
+      x: p.facing > 0 ? p.x + 5 : p.x - reach - 5,
+      y: p.y - 30,
+      w: reach,
+      h: 28
+    };
+    if (overlap(hitbox, botRect())) {
+      p.meleeConnected = true;
+      damageBot(1, p.facing * 4.2, -2.8, game.bot.x, game.bot.y - 15);
+    }
+  }
+
+  function checkHeadStomp(previousFeetY) {
+    const p = game.player;
+    const bot = game.bot;
+    if (!bot.alive || p.stompCooldown > 0 || p.vy < 0) return;
+    const top = bot.y - PLAYER_H;
+    const horizontal = Math.abs(p.x - bot.x) < PLAYER_HALF_W * 2;
+    if (horizontal && previousFeetY <= top + 3 && p.y >= top && p.y <= top + 12) {
+      p.y = top;
+      p.vy = -6.7;
+      p.yRemainder = 0;
+      p.stompCooldown = 18;
+      p.squash = .82;
+      p.stretch = 1.16;
+      damageBot(1, Math.sign(bot.x - p.x || p.facing) * 2.2, 2.3, bot.x, top + 5);
+      emitDust(p.x, p.y, 7);
+    }
   }
 
   function update() {
@@ -470,20 +542,46 @@
     if (p.dropping > 0) p.dropping -= 1;
     p.shootTimer = Math.max(0, p.shootTimer - 1);
     p.shootCooldown = Math.max(0, p.shootCooldown - 1);
+    p.meleeTimer = Math.max(0, p.meleeTimer - 1);
+    p.meleeCooldown = Math.max(0, p.meleeCooldown - 1);
+    p.stompCooldown = Math.max(0, p.stompCooldown - 1);
     p.dashTimer = Math.max(0, p.dashTimer - 1);
     p.dashCooldown = Math.max(0, p.dashCooldown - 1);
     p.hitTimer = Math.max(0, p.hitTimer - 1);
 
     movePlatforms();
 
-    const direction = Number(input.right) - Number(input.left);
-    if (direction) p.facing = direction;
+    const movementDirection = Number(input.right) - Number(input.left);
+    if (input.shootHeld) {
+      const aim = aimVector();
+      p.aimX = aim.x;
+      p.aimY = aim.y;
+      p.aiming = true;
+      if (Math.abs(aim.x) > .2) p.facing = Math.sign(aim.x);
+    }
+    if (input.shootReleased && !p.aiming) {
+      const aim = aimVector();
+      p.aimX = aim.x;
+      p.aimY = aim.y;
+      p.aiming = true;
+    }
+    const direction = p.aiming ? 0 : movementDirection;
+    if (!p.aiming && direction) p.facing = direction;
 
-    if (input.shootPressed && p.shootCooldown <= 0) {
-      spawnProjectile(p, 'player');
+    if (input.shootReleased && p.aiming && p.shootCooldown <= 0) {
+      spawnProjectile(p, 'player', p.aimX, p.aimY);
       p.shootTimer = 15;
-      p.shootCooldown = 13;
+      p.shootCooldown = 16;
+      p.aiming = false;
       vibrate(9);
+    }
+    if (!input.shootHeld && !input.shootReleased) p.aiming = false;
+
+    if (input.meleePressed && p.meleeCooldown <= 0) {
+      p.meleeTimer = 15;
+      p.meleeCooldown = 24;
+      p.meleeConnected = false;
+      vibrate(11);
     }
 
     if (input.dashPressed && p.dashCooldown <= 0) {
@@ -565,8 +663,11 @@
       if (!input.jumpHeld && p.vy < -3.2) p.vy = approach(p.vy, -3.2, .45);
     }
 
+    const previousFeetY = p.y;
     movePlayerX(p.vx);
     movePlayerY(p.vy);
+    checkHeadStomp(previousFeetY);
+    updateMeleeHit();
     p.grounded = standingSurface();
 
     if (!wasGrounded && p.grounded && p.vy === 0) {
@@ -581,7 +682,9 @@
     p.animationTime += STEP;
     if (p.hitTimer > 0) p.animation = 'hit';
     else if (p.dashTimer > 0) p.animation = 'dash';
+    else if (p.meleeTimer > 0) p.animation = 'melee';
     else if (p.shootTimer > 0) p.animation = 'shoot';
+    else if (p.aiming && p.aimY < -.35) p.animation = 'look';
     else if (p.clinging) p.animation = 'cling';
     else if (!p.grounded) p.animation = p.vy < 0 ? 'jump' : 'fall';
     else if (p.crouching) p.animation = 'crouch';
@@ -596,7 +699,8 @@
     updateProjectiles();
     updateCamera();
     input.jumpPressed = false;
-    input.shootPressed = false;
+    input.shootReleased = false;
+    input.meleePressed = false;
     input.dashPressed = false;
   }
 
@@ -779,11 +883,14 @@
     for (const note of game.projectiles) {
       const x = Math.round(note.x - game.camera.x);
       const y = Math.round(note.y - game.camera.y);
+      const speed = Math.hypot(note.vx, note.vy) || 1;
+      const trailX = note.vx / speed;
+      const trailY = note.vy / speed;
       ctx.strokeStyle = note.owner === 'player' ? '#fff3b0' : '#8ed7ff';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(x - Math.sign(note.vx) * 13, y);
-      ctx.lineTo(x - Math.sign(note.vx) * 4, y);
+      ctx.moveTo(x - trailX * 15, y - trailY * 15);
+      ctx.lineTo(x - trailX * 5, y - trailY * 5);
       ctx.stroke();
       ctx.fillStyle = note.owner === 'player' ? '#ce146c' : '#2267c9';
       ctx.strokeStyle = '#363542';
@@ -791,6 +898,28 @@
       ctx.strokeText('♪', x, y);
       ctx.fillText('♪', x, y);
     }
+    ctx.restore();
+  }
+
+  function drawAimGuide() {
+    const p = game.player;
+    if (!p.aiming) return;
+    const originX = p.x - game.camera.x + p.aimX * 10;
+    const originY = p.y - game.camera.y - 22 + p.aimY * 6;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 243, 176, .82)';
+    ctx.fillStyle = '#ce146c';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(originX, originY);
+    ctx.lineTo(originX + p.aimX * 70, originY + p.aimY * 70);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = 'bold 13px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('♪', originX + p.aimX * 76, originY + p.aimY * 76);
     ctx.restore();
   }
 
@@ -812,22 +941,7 @@
     drawProjectiles();
     drawBot();
     drawPlayer();
-
-    if (game.mode === 'paused') {
-      ctx.fillStyle = 'rgba(54,53,66,.72)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#f4ecd7';
-      ctx.font = 'bold 24px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2);
-      ctx.font = '12px monospace';
-      ctx.fillText('Press P or tap the stage', canvas.width / 2, canvas.height / 2 + 24);
-    }
-  }
-
-  function togglePause(force) {
-    game.mode = force || (game.mode === 'paused' ? 'playing' : 'paused');
-    render();
+    drawAimGuide();
   }
 
   function vibrate(pattern) {
@@ -854,15 +968,17 @@
       event.preventDefault();
     }
     if (!event.repeat && ['ShiftLeft', 'ShiftRight', 'KeyX', 'KeyJ'].includes(event.code)) {
-      input.shootPressed = true;
+      input.shootHeld = true;
+      event.preventDefault();
+    }
+    if (!event.repeat && ['KeyV', 'KeyL', 'KeyM'].includes(event.code)) {
+      input.meleePressed = true;
       event.preventDefault();
     }
     if (!event.repeat && ['KeyB', 'KeyC', 'KeyK'].includes(event.code)) {
       input.dashPressed = true;
       event.preventDefault();
     }
-    if (!event.repeat && event.code === 'KeyR') resetGame();
-    if (!event.repeat && event.code === 'KeyP') togglePause();
     if (!event.repeat && event.code === 'KeyF') {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen?.();
@@ -874,10 +990,15 @@
     if (document.body.classList.contains('skin-editor-open')) return;
     if (keyMap.has(event.code)) input[keyMap.get(event.code)] = false;
     if (event.code === 'Space') input.jumpHeld = false;
+    if (['ShiftLeft', 'ShiftRight', 'KeyX', 'KeyJ'].includes(event.code) && input.shootHeld) {
+      input.shootHeld = false;
+      input.shootReleased = true;
+    }
   });
 
   window.addEventListener('blur', () => {
-    input.left = input.right = input.up = input.down = input.jumpHeld = false;
+    input.left = input.right = input.up = input.down = input.jumpHeld = input.shootHeld = false;
+    input.aimAxisX = input.aimAxisY = 0;
   });
 
   const joystick = document.getElementById('joystick');
@@ -895,6 +1016,8 @@
     const scale = Math.min(1, max / length);
     const x = rawX * scale;
     const y = rawY * scale;
+    input.aimAxisX = Math.max(-1, Math.min(1, rawX / max));
+    input.aimAxisY = Math.max(-1, Math.min(1, rawY / max));
     joystickKnob.style.transform = `translate(${x}px, ${y}px)`;
     input.left = rawX < -box.width * .12;
     input.right = rawX > box.width * .12;
@@ -915,6 +1038,7 @@
     if (event.pointerId !== joystickPointer) return;
     joystickPointer = null;
     input.left = input.right = input.up = input.down = false;
+    input.aimAxisX = input.aimAxisY = 0;
     joystickKnob.style.transform = 'translate(0, 0)';
   }
   joystick.addEventListener('pointerup', releaseJoystick);
@@ -937,9 +1061,33 @@
   }
 
   const shootButton = document.getElementById('shootButton');
+  const meleeButton = document.getElementById('meleeButton');
   const dashButton = document.getElementById('dashButton');
   const jumpButton = document.getElementById('jumpButton');
-  bindTapButton(shootButton, 'shootPressed');
+  let shootPointer = null;
+  shootButton.addEventListener('pointerdown', event => {
+    shootPointer = event.pointerId;
+    shootButton.setPointerCapture(event.pointerId);
+    shootButton.classList.add('is-active');
+    input.shootHeld = true;
+    hideHelpSoon();
+    event.preventDefault();
+  });
+  shootButton.addEventListener('pointerup', event => {
+    if (event.pointerId !== shootPointer) return;
+    shootPointer = null;
+    if (shootButton.hasPointerCapture?.(event.pointerId)) shootButton.releasePointerCapture(event.pointerId);
+    shootButton.classList.remove('is-active');
+    input.shootHeld = false;
+    input.shootReleased = true;
+  });
+  shootButton.addEventListener('pointercancel', event => {
+    if (event.pointerId !== shootPointer) return;
+    shootPointer = null;
+    shootButton.classList.remove('is-active');
+    input.shootHeld = false;
+  });
+  bindTapButton(meleeButton, 'meleePressed');
   bindTapButton(dashButton, 'dashPressed');
   jumpButton.addEventListener('pointerdown', event => {
     input.jumpPressed = true;
@@ -958,22 +1106,15 @@
   jumpButton.addEventListener('pointercancel', releaseJump);
 
   canvas.addEventListener('pointerdown', () => {
-    if (game.mode === 'paused') togglePause('playing');
     canvas.focus({ preventScroll: true });
     hideHelpSoon();
   });
-  document.getElementById('resetButton').addEventListener('click', () => resetGame());
   document.getElementById('helpButton').addEventListener('click', () => {
     const help = document.getElementById('help');
     help.classList.toggle('is-hidden');
   });
 
-  window.addEventListener('ash-skin-editor:open', () => {
-    game.modeBeforeSkinEditor = game.mode;
-    togglePause('paused');
-  });
   window.addEventListener('ash-skin-editor:close', () => {
-    togglePause(game.modeBeforeSkinEditor || 'playing');
     canvas.focus({ preventScroll: true });
   });
 
@@ -990,7 +1131,7 @@
       game.playerName = event.data.payload?.playerName || 'Climber';
       skinEditor?.setAdmin(event.data.payload?.isAdmin === true);
     }
-    if (trustedParent && event.data?.type === 'bcd:encore:command' && event.data.payload?.command === 'close') togglePause('paused');
+    // Closing the host overlay never pauses or rewinds this always-live simulation.
   });
 
   window.render_game_to_text = () => JSON.stringify({
@@ -1013,6 +1154,9 @@
       character: ash?.ready ? 'Ash' : (ash?.failed ? 'Pirate fallback' : 'Ash loading'),
       rigAnimation: ash?.currentAnimation || null,
       shooting: game.player.shootTimer > 0,
+      aiming: game.player.aiming,
+      aim: { x: Number(game.player.aimX.toFixed(2)), y: Number(game.player.aimY.toFixed(2)) },
+      melee: game.player.meleeTimer > 0,
       dashing: game.player.dashTimer > 0,
       dashCooldown: game.player.dashCooldown,
       section: Math.min(3, Math.floor(game.player.x / VIEW.width) + 1)
@@ -1027,7 +1171,7 @@
       animation: game.bot.animation,
       rigAnimation: botRig?.currentAnimation || null
     } : null,
-    projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), direction: Math.sign(note.vx) })),
+    projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), vx: Number(note.vx.toFixed(2)), vy: Number(note.vy.toFixed(2)) })),
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
     deaths: game.deaths,
     botKnockouts: game.kills,

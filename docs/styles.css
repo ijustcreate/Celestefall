@@ -288,9 +288,9 @@ button { font: inherit; }
 
 .action-cluster {
   position: relative;
-  width: 214px;
+  width: 286px;
   height: 142px;
-  flex: 0 0 214px;
+  flex: 0 0 286px;
 }
 
 .action-button {
@@ -310,11 +310,14 @@ button { font: inherit; }
 .action-button:active, .action-button.is-active { transform: translateY(4px) scale(.97); box-shadow: inset 0 0 0 4px #eadfd6, 0 2px 0 #5b5b5b; }
 .action-button.jump { right: 0; top: 17px; }
 .action-button.shoot,
-.action-button.dash { width: 76px; height: 76px; }
-.action-button.shoot { left: 0; top: 0; background: radial-gradient(circle at 34% 25%, #6d6c7a, #34333d 66%); }
-.action-button.dash { left: 58px; bottom: 14px; background: radial-gradient(circle at 34% 25%, #557cc8, #293963 66%); }
+.action-button.dash,
+.action-button.melee { width: 76px; height: 76px; }
+.action-button.shoot { left: 0; top: 33px; background: radial-gradient(circle at 34% 25%, #6d6c7a, #34333d 66%); }
+.action-button.melee { left: 82px; top: 0; background: radial-gradient(circle at 34% 25%, #d5a454, #70401f 66%); }
+.action-button.dash { left: 82px; bottom: 4px; background: radial-gradient(circle at 34% 25%, #557cc8, #293963 66%); }
 .action-button.shoot b,
-.action-button.dash b { font-size: 22px; }
+.action-button.dash b,
+.action-button.melee b { font-size: 22px; }
 
 @media (pointer: fine) and (min-width: 700px) {
   .game-shell { grid-template-rows: 1fr; }
@@ -345,31 +348,61 @@ button { font: inherit; }
 }
 
 @media (orientation: landscape) and (pointer: coarse) {
-  .game-shell { grid-template-rows: minmax(0, 1fr) 142px; }
-  .touch-controls { min-height: 142px; height: 142px; padding-block: 4px max(6px, env(safe-area-inset-bottom)); }
+  .game-shell { display: block; position: relative; }
+  .stage-wrap { position: absolute; inset: 0; place-items: center; }
   #game {
-    width: min(100vw, calc((100vh - 142px) * 16 / 9));
-    height: min(calc(100vh - 142px), calc(100vw * 9 / 16));
+    width: max(100vw, calc(100vh * 16 / 9));
+    height: max(100vh, calc(100vw * 9 / 16));
     max-width: none;
     max-height: none;
   }
+  .touch-controls {
+    position: fixed;
+    z-index: 12;
+    inset: 0;
+    min-height: 0;
+    height: auto;
+    padding: max(8px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    align-items: flex-end;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    pointer-events: none;
+  }
+  .joystick,
+  .action-cluster { pointer-events: auto; }
+  .touch-hint { display: none; }
   .joystick { width: 116px; height: 116px; flex-basis: 116px; }
+  .joystick-ring {
+    border-color: rgba(244,236,215,.48);
+    background: rgba(42,40,52,.2);
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.12);
+  }
   .joystick-knob { left: 26px; top: 26px; }
-  .action-cluster { height: 126px; }
+  .joystick-knob { opacity: .78; }
+  .action-cluster { width: 286px; height: 126px; flex-basis: 286px; }
   .action-button { width: 82px; height: 82px; }
   .action-button.shoot,
-  .action-button.dash { width: 68px; height: 68px; }
-  .action-button.dash { left: 54px; bottom: 10px; }
+  .action-button.dash,
+  .action-button.melee { width: 68px; height: 68px; }
+  .action-button { opacity: .82; }
+  .action-button.shoot { top: 29px; }
+  .action-button.melee { left: 76px; top: 0; }
+  .action-button.dash { left: 76px; bottom: 6px; }
+  .action-button span { color: rgba(255,243,223,.9); text-shadow: 0 1px 2px #1a1520; }
 }
 
 @media (max-width: 390px) {
   .touch-controls { min-height: 154px; padding-inline: 10px; gap: 4px; }
   .joystick { width: 120px; height: 120px; flex-basis: 120px; }
   .joystick-knob { left: 28px; top: 28px; }
-  .action-cluster { width: 190px; height: 132px; flex-basis: 190px; }
+  .action-cluster { width: 236px; height: 132px; flex-basis: 236px; }
   .action-button { width: 86px; height: 86px; }
   .action-button.shoot,
-  .action-button.dash { width: 68px; height: 68px; }
-  .action-button.dash { left: 52px; bottom: 14px; }
+  .action-button.dash,
+  .action-button.melee { width: 64px; height: 64px; }
+  .action-button.shoot { top: 34px; }
+  .action-button.melee { left: 68px; }
+  .action-button.dash { left: 68px; bottom: 14px; }
   .touch-hint { display: none; }
 }

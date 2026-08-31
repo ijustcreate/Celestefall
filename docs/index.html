@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#363542">
   <title>Celestefall — Web Port</title>
   <link rel="icon" href="assets/ash/Ash.png">
-  <link rel="stylesheet" href="styles.css?v=20260831-skin-studio">
+  <link rel="stylesheet" href="styles.css?v=20260831-live-combat">
 </head>
 <body>
   <main class="game-shell" aria-label="Celestefall web demo">
@@ -17,12 +17,11 @@
         <div class="hud-actions">
           <button id="skinEditorButton" class="icon-button skin-editor-button" type="button" aria-label="Open Ash skin editor" title="Ash Skin Studio" hidden>✦</button>
           <button id="helpButton" class="icon-button" type="button" aria-label="Show controls">?</button>
-          <button id="resetButton" class="icon-button" type="button" aria-label="Reset demo">↻</button>
         </div>
       </div>
       <section id="help" class="help-card" aria-live="polite">
         <strong>ASH IS BACK IN ACTION.</strong>
-        <span>Move into walls to cling · A / Space jump · ♪ / Shift shoot · B / C dash</span>
+        <span>Move into walls to cling · Hold ♪ / Shift to aim, release to fire · A jump · B dash · ⚔ melee</span>
       </section>
     </section>
 
@@ -34,6 +33,7 @@
       <div class="touch-hint" aria-hidden="true">MOVE</div>
       <div class="action-cluster">
         <button id="shootButton" class="action-button shoot" type="button"><span>SHOOT</span><b>♪</b></button>
+        <button id="meleeButton" class="action-button melee" type="button"><span>MELEE</span><b>⚔</b></button>
         <button id="dashButton" class="action-button dash" type="button"><span>DASH</span><b>B</b></button>
         <button id="jumpButton" class="action-button jump" type="button"><span>JUMP</span><b>A</b></button>
       </div>
@@ -54,6 +54,7 @@
                 <option value="idle">Idle</option><option value="run">Run</option><option value="jump">Jump</option>
                 <option value="fall">Fall</option><option value="cling">Wall cling</option><option value="crouch">Crouch</option>
                 <option value="look">Aim up</option><option value="shoot">Shoot</option><option value="dash">Dash</option>
+                <option value="melee">Sword attack</option>
               </select>
             </label>
           </div>
@@ -80,8 +81,8 @@
     </section>
   </main>
   <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="ash-character.js?v=20260831-skin-studio"></script>
-  <script src="skin-editor.js?v=20260831-skin-studio"></script>
-  <script src="game.js?v=20260831-skin-studio"></script>
+  <script src="ash-character.js?v=20260831-live-combat"></script>
+  <script src="skin-editor.js?v=20260831-live-combat"></script>
+  <script src="game.js?v=20260831-live-combat"></script>
 </body>
 </html>
