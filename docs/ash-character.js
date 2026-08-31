@@ -55,6 +55,7 @@
       this.basePath = options.basePath || 'assets/ash';
       this.scale = options.scale || 0.086;
       this.skin = options.skin || 'pistol_01';
+      this.animationMap = options.animations || ANIMATIONS;
       this.palette = { ...DEFAULT_PALETTE, ...(options.palette || {}) };
       this.ready = false;
       this.failed = false;
@@ -116,7 +117,7 @@
 
     setState(logicalState, immediate = false) {
       if (!this.state) return;
-      const next = ANIMATIONS[logicalState] || ANIMATIONS.idle;
+      const next = this.animationMap[logicalState] || this.animationMap.idle || ANIMATIONS.idle;
       if (!immediate && this.currentState === logicalState) return;
       if (immediate) this.state.clearTracks();
       this.state.setAnimation(0, next.name, next.loop);

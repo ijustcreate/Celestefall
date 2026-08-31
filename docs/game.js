@@ -44,6 +44,33 @@
     assetName: 'Player2',
     basePath: 'assets/player2'
   }) : null;
+  const BAT_ANIMATIONS = {
+    idle: { name: 'idle', loop: true },
+    run: { name: 'fly', loop: true },
+    attack: { name: 'attack', loop: false },
+    hit: { name: 'hit', loop: false },
+    death: { name: 'death', loop: false }
+  };
+  const SLUG_ANIMATIONS = {
+    idle: { name: 'idle', loop: true },
+    run: { name: 'walk', loop: true },
+    attack: { name: 'attack', loop: false },
+    hit: { name: 'hit', loop: false },
+    death: { name: 'death', loop: false }
+  };
+  const CREATURE_SPECS = [
+    { id: 'slug-west', type: 'slug', spawnX: 420, spawnY: 328, patrolMin: 392, patrolMax: 492, health: 2, width: 34, height: 22 },
+    { id: 'slug-east', type: 'slug', spawnX: 1380, spawnY: 328, patrolMin: 1308, patrolMax: 1430, health: 2, width: 34, height: 22 },
+    { id: 'bat-west', type: 'bat', spawnX: 520, spawnY: 210, patrolMin: 430, patrolMax: 610, health: 1, width: 32, height: 25 },
+    { id: 'bat-east', type: 'bat', spawnX: 1080, spawnY: 190, patrolMin: 990, patrolMax: 1170, health: 1, width: 32, height: 25 }
+  ];
+  const creatureRigs = new Map(CREATURE_SPECS.map(spec => [spec.id,
+    window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, spec.type === 'bat' ? {
+      assetName: 'bat', basePath: 'assets/bat', scale: .12, skin: 'Bat', animations: BAT_ANIMATIONS
+    } : {
+      assetName: 'Slugger setup', basePath: 'assets/slug', scale: .14, skin: 'Slug', animations: SLUG_ANIMATIONS
+    }) : null
+  ]));
 
   const fixed = [
     { x: 0, y: 0, w: 16, h: 360, kind: 'solid' },
@@ -108,8 +135,10 @@
     particles: [],
     projectiles: [],
     kills: 0,
+    creatureKills: 0,
     movers: makeMovers(),
     bot: null,
+    creatures: [],
     player: null
   };
 
@@ -181,10 +210,40 @@
     };
   }
 
+  function freshCreature(spec) {
+    return {
+      id: spec.id,
+      type: spec.type,
+      spawnX: spec.spawnX,
+      spawnY: spec.spawnY,
+      patrolMin: spec.patrolMin,
+      patrolMax: spec.patrolMax,
+      width: spec.width,
+      height: spec.height,
+      x: spec.spawnX,
+      y: spec.spawnY,
+      vx: 0,
+      vy: 0,
+      facing: spec.id.endsWith('west') ? 1 : -1,
+      health: spec.health,
+      maxHealth: spec.health,
+      alive: true,
+      respawnTimer: 0,
+      hitTimer: 0,
+      attackTimer: 0,
+      attackDuration: 0,
+      attackCooldown: 45 + Math.floor(Math.random() * 45),
+      attackConnected: false,
+      phase: Math.random() * Math.PI * 2,
+      animation: 'idle'
+    };
+  }
+
   function resetGame(countDeath = false) {
     if (countDeath) game.deaths += 1;
     game.player = freshPlayer();
     game.bot = freshBot();
+    game.creatures = CREATURE_SPECS.map(freshCreature);
     game.movers = makeMovers();
     game.camera.x = innerHeight > innerWidth ? SPAWN.x - VIEW.width / 2 : 0;
     game.camera.y = 0;
@@ -408,6 +467,154 @@
     vibrate([16, 24, 16]);
   }
 
+  function creatureRect(creature) {
+    return {
+      x: creature.x - creature.width / 2,
+      y: creature.y - creature.height,
+      w: creature.width,
+      h: creature.height
+    };
+  }
+
+  function damageCreature(creature, amount, knockbackX, knockbackY) {
+    if (!creature.alive) return false;
+    creature.health -= amount;
+    creature.vx = knockbackX;
+    creature.vy = knockbackY;
+    creature.hitTimer = 14;
+    creature.animation = creature.health > 0 ? 'hit' : 'death';
+    emitDust(creature.x, creature.y - creature.height / 2, creature.health > 0 ? 7 : 15);
+    vibrate(creature.health > 0 ? 14 : [20, 20, 28]);
+    if (creature.health <= 0) {
+      creature.alive = false;
+      creature.respawnTimer = 120;
+      game.creatureKills += 1;
+    }
+    return true;
+  }
+
+  function respawnCreature(creature) {
+    const spec = CREATURE_SPECS.find(candidate => candidate.id === creature.id);
+    if (!spec) return;
+    Object.assign(creature, freshCreature(spec));
+    creatureRigs.get(creature.id)?.update(0, 'idle');
+  }
+
+  function startCreatureAttack(creature, duration) {
+    creature.attackDuration = duration;
+    creature.attackTimer = duration;
+    creature.attackConnected = false;
+    creature.attackCooldown = creature.type === 'bat'
+      ? 110 + Math.floor(Math.random() * 45)
+      : 80 + Math.floor(Math.random() * 35);
+  }
+
+  function creatureAttackCanHit(creature) {
+    const elapsed = creature.attackDuration - creature.attackTimer;
+    return creature.type === 'bat'
+      ? elapsed >= 8 && elapsed <= 21
+      : elapsed >= 7 && elapsed <= 15;
+  }
+
+  function creatureAttackRect(creature) {
+    if (creature.type === 'bat') {
+      const rect = creatureRect(creature);
+      return { x: rect.x - 5, y: rect.y - 5, w: rect.w + 10, h: rect.h + 10 };
+    }
+    return {
+      x: creature.facing > 0 ? creature.x + 2 : creature.x - 38,
+      y: creature.y - 22,
+      w: 36,
+      h: 22
+    };
+  }
+
+  function updateCreature(creature) {
+    const rig = creatureRigs.get(creature.id);
+    if (!creature.alive) {
+      creature.respawnTimer -= 1;
+      creature.animation = 'death';
+      rig?.update(STEP, creature.animation);
+      if (creature.respawnTimer <= 0) respawnCreature(creature);
+      return;
+    }
+
+    creature.hitTimer = Math.max(0, creature.hitTimer - 1);
+    creature.attackTimer = Math.max(0, creature.attackTimer - 1);
+    creature.attackCooldown = Math.max(0, creature.attackCooldown - 1);
+    creature.phase += creature.type === 'bat' ? .045 : .02;
+    const player = game.player;
+    const dx = player.x - creature.x;
+    const dy = (player.y - PLAYER_H / 2) - (creature.y - creature.height / 2);
+
+    if (creature.type === 'slug') {
+      if (creature.attackCooldown <= 0 && Math.abs(dx) < 39 && Math.abs(dy) < 34) {
+        creature.facing = Math.sign(dx) || creature.facing;
+        startCreatureAttack(creature, 24);
+      }
+      if (creature.hitTimer > 0) {
+        creature.x = Math.max(creature.patrolMin, Math.min(creature.patrolMax, creature.x + creature.vx));
+        creature.vx *= .82;
+      } else if (creature.attackTimer > 0) {
+        creature.vx = 0;
+      } else {
+        const chasing = Math.abs(dx) < 190 && Math.abs(dy) < 48;
+        let direction = chasing ? Math.sign(dx) : creature.facing;
+        if (creature.x <= creature.patrolMin + 2) direction = 1;
+        if (creature.x >= creature.patrolMax - 2) direction = -1;
+        creature.facing = direction || creature.facing;
+        creature.vx = approach(creature.vx, creature.facing * .52, .08);
+        creature.x = Math.max(creature.patrolMin, Math.min(creature.patrolMax, creature.x + creature.vx));
+      }
+      creature.y = creature.spawnY;
+    } else {
+      const playerNear = Math.abs(dx) < 270 && Math.abs(dy) < 180;
+      if (creature.attackCooldown <= 0 && playerNear && Math.hypot(dx, dy) < 105) {
+        creature.facing = Math.sign(dx) || creature.facing;
+        startCreatureAttack(creature, 30);
+      }
+      if (creature.hitTimer > 0) {
+        creature.x += creature.vx;
+        creature.y += creature.vy;
+        creature.vx *= .9;
+        creature.vy *= .9;
+      } else if (creature.attackTimer > 0) {
+        creature.facing = Math.sign(dx) || creature.facing;
+        creature.vx = approach(creature.vx, Math.sign(dx) * 2.2, .22);
+        creature.vy = approach(creature.vy, Math.sign(dy) * 1.65, .18);
+        creature.x += creature.vx;
+        creature.y += creature.vy;
+      } else {
+        const targetX = playerNear
+          ? Math.max(creature.patrolMin, Math.min(creature.patrolMax, player.x))
+          : creature.spawnX + Math.sin(creature.phase * .72) * 62;
+        const targetY = playerNear ? player.y - 62 : creature.spawnY + Math.sin(creature.phase) * 24;
+        creature.facing = Math.sign(targetX - creature.x) || creature.facing;
+        creature.vx = approach(creature.vx, Math.sign(targetX - creature.x) * 1.05, .08);
+        creature.vy = approach(creature.vy, Math.sign(targetY - creature.y) * .72, .07);
+        creature.x += creature.vx;
+        creature.y += creature.vy;
+      }
+      creature.x = Math.max(creature.patrolMin, Math.min(creature.patrolMax, creature.x));
+      creature.y = Math.max(76, Math.min(WORLD.height - 48, creature.y));
+    }
+
+    if (creatureAttackCanHit(creature) && !creature.attackConnected && overlap(creatureAttackRect(creature), rectAt())) {
+      creature.attackConnected = true;
+      hitPlayer(creature.facing * (creature.type === 'bat' ? 2.9 : 2.5), creature.type === 'bat' ? 2.4 : -2.2);
+    }
+
+    if (creature.hitTimer > 0) creature.animation = 'hit';
+    else if (creature.attackTimer > 0) creature.animation = 'attack';
+    else if (Math.abs(creature.vx) > .12 || creature.type === 'bat') creature.animation = 'run';
+    else creature.animation = 'idle';
+    rig?.update(STEP, creature.animation);
+  }
+
+  function updateCreatures() {
+    game.creatures.forEach(updateCreature);
+  }
+
   function meleeHitbox(actor, direction) {
     const reach = 31;
     if (direction === 'up') return { x: actor.x - 14, y: actor.y - 62, w: 28, h: 39 };
@@ -560,6 +767,17 @@
         damageBot(1, Math.sign(note.vx || game.player.facing) * 3.4, -2.5);
       }
 
+      if (note.owner === 'player' && note.life > 0) {
+        const creature = game.creatures.find(enemy => enemy.alive && overlap(
+          { x: note.x - 4, y: note.y - 4, w: 8, h: 8 },
+          creatureRect(enemy)
+        ));
+        if (creature) {
+          note.life = 0;
+          damageCreature(creature, 1, Math.sign(note.vx || game.player.facing) * 2.7, note.vy * .25);
+        }
+      }
+
       if (note.owner === 'bot' && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, rectAt())) {
         note.life = 0;
         hitPlayer(Math.sign(note.vx) * 2.8, -2.5);
@@ -583,30 +801,43 @@
 
   function updateMeleeHit() {
     const p = game.player;
-    if (!meleeCanHit(p) || p.meleeConnected || !game.bot.alive) return;
+    if (!meleeCanHit(p) || p.meleeConnected) return;
     const hitbox = meleeHitbox(p, p.meleeDirection);
-    if (overlap(hitbox, botRect())) {
-      p.meleeConnected = true;
-      const knockbackX = p.meleeDirection === 'forward' ? p.facing * 4.2 : Math.sign(game.bot.x - p.x) * 1.8;
-      const knockbackY = p.meleeDirection === 'up' ? -4.2 : (p.meleeDirection === 'down' ? 3.4 : -2.8);
-      damageBot(1, knockbackX, knockbackY, game.bot.x, game.bot.y - 15);
-    }
+    const botTarget = game.bot.alive && overlap(hitbox, botRect()) ? game.bot : null;
+    const creatureTarget = game.creatures.find(creature => creature.alive && overlap(hitbox, creatureRect(creature)));
+    const target = botTarget || creatureTarget;
+    if (!target) return;
+    p.meleeConnected = true;
+    const knockbackX = p.meleeDirection === 'forward' ? p.facing * 4.2 : Math.sign(target.x - p.x) * 1.8;
+    const knockbackY = p.meleeDirection === 'up' ? -4.2 : (p.meleeDirection === 'down' ? 3.4 : -2.8);
+    if (target === game.bot) damageBot(1, knockbackX, knockbackY, target.x, target.y - 15);
+    else damageCreature(target, 1, knockbackX, knockbackY);
   }
 
   function checkHeadStomp(previousFeetY) {
     const p = game.player;
-    const bot = game.bot;
-    if (!bot.alive || p.stompCooldown > 0 || p.vy < 0) return;
-    const top = bot.y - PLAYER_H;
-    const horizontal = Math.abs(p.x - bot.x) < PLAYER_HALF_W * 2;
-    if (horizontal && previousFeetY <= top + 3 && p.y >= top && p.y <= top + 12) {
+    if (p.stompCooldown > 0 || p.vy < 0) return;
+    const targets = [];
+    if (game.bot.alive) targets.push({ actor: game.bot, rect: botRect(), isBot: true });
+    for (const creature of game.creatures) {
+      if (creature.alive) targets.push({ actor: creature, rect: creatureRect(creature), isBot: false });
+    }
+    const target = targets.find(candidate => {
+      const top = candidate.rect.y;
+      const horizontal = p.x + PLAYER_HALF_W > candidate.rect.x && p.x - PLAYER_HALF_W < candidate.rect.x + candidate.rect.w;
+      return horizontal && previousFeetY <= top + 3 && p.y >= top && p.y <= top + 12;
+    });
+    if (target) {
+      const top = target.rect.y;
       p.y = top;
       p.vy = -6.7;
       p.yRemainder = 0;
       p.stompCooldown = 18;
       p.squash = .82;
       p.stretch = 1.16;
-      damageBot(1, Math.sign(bot.x - p.x || p.facing) * 2.2, 2.3, bot.x, top + 5);
+      const knockbackX = Math.sign(target.actor.x - p.x || p.facing) * 2.2;
+      if (target.isBot) damageBot(1, knockbackX, 2.3, target.actor.x, top + 5);
+      else damageCreature(target.actor, 1, knockbackX, 2.3);
       emitDust(p.x, p.y, 7);
     }
   }
@@ -784,6 +1015,7 @@
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
     updateBot();
+    updateCreatures();
     updateProjectiles();
     updateCamera();
     input.jumpPressed = false;
@@ -963,6 +1195,43 @@
     }
   }
 
+  function drawCreatures() {
+    for (const creature of game.creatures) {
+      if (!creature.alive && creature.respawnTimer < 88) continue;
+      const x = Math.round((creature.x - game.camera.x) * 2) / 2;
+      const y = Math.round(creature.y - game.camera.y);
+      if (x < -70 || x > canvas.width + 70) continue;
+      const rig = creatureRigs.get(creature.id);
+      if (rig?.ready) rig.draw(x, y, creature.facing, 1, 1);
+      else if (creature.type === 'bat') {
+        ctx.fillStyle = '#53355f';
+        ctx.beginPath();
+        ctx.moveTo(x, y - 10);
+        ctx.lineTo(x - 18, y - 21);
+        ctx.lineTo(x - 12, y - 4);
+        ctx.lineTo(x, y - 14);
+        ctx.lineTo(x + 12, y - 4);
+        ctx.lineTo(x + 18, y - 21);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillStyle = '#7aa83b';
+        ctx.beginPath();
+        ctx.ellipse(x, y - 8, 17, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (creature.alive && creature.maxHealth > 1) {
+        ctx.fillStyle = '#363542';
+        ctx.fillRect(x - 10, y - creature.height - 8, 20, 5);
+        for (let index = 0; index < creature.maxHealth; index += 1) {
+          ctx.fillStyle = index < creature.health ? '#a8d95b' : '#5d586c';
+          ctx.fillRect(x - 8 + index * 8, y - creature.height - 7, 6, 2);
+        }
+      }
+    }
+  }
+
   function drawProjectiles() {
     ctx.save();
     ctx.font = 'bold 15px Georgia, serif';
@@ -1027,6 +1296,7 @@
     drawPlatforms();
     drawParticles();
     drawProjectiles();
+    drawCreatures();
     drawBot();
     drawPlayer();
     drawAimGuide();
@@ -1262,12 +1532,45 @@
       meleeDirection: game.bot.meleeDirection,
       rigAnimation: botRig?.currentAnimation || null
     } : null,
+    creatures: game.creatures.map(creature => {
+      const rig = creatureRigs.get(creature.id);
+      return {
+        id: creature.id,
+        type: creature.type,
+        x: Math.round(creature.x),
+        y: Math.round(creature.y),
+        health: creature.health,
+        alive: creature.alive,
+        respawnTimer: creature.respawnTimer,
+        animation: creature.animation,
+        rigAnimation: rig?.currentAnimation || null
+      };
+    }),
     projectiles: game.projectiles.map(note => ({ owner: note.owner, x: Math.round(note.x), y: Math.round(note.y), vx: Number(note.vx.toFixed(2)), vy: Number(note.vy.toFixed(2)) })),
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
     deaths: game.deaths,
     botKnockouts: game.kills,
+    creatureKnockouts: game.creatureKills,
     skinEditor: skinEditor?.state?.() || null
   });
+
+  // Local-only deterministic combat hooks keep production closed while the
+  // browser QA loop can verify every creature's death and respawn lifecycle.
+  if (localAdminPreview) {
+    window.__celestefallTest = {
+      damageCreature(id, amount = 1) {
+        const creature = game.creatures.find(enemy => enemy.id === id);
+        return creature ? damageCreature(creature, amount, 0, 0) : false;
+      },
+      setPlayerPosition(x, y) {
+        game.player.x = x;
+        game.player.y = y;
+        game.player.vx = 0;
+        game.player.vy = 0;
+        updateCamera(true);
+      }
+    };
+  }
 
   window.advanceTime = milliseconds => {
     const steps = Math.max(1, Math.round(milliseconds / (1000 / 60)));
@@ -1308,10 +1611,18 @@
       botRig.failed = true;
       console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
     });
-    await Promise.all([fallbackImages, ashRig, blueRig]);
+    const creatureLoads = CREATURE_SPECS.map(spec => {
+      const rig = creatureRigs.get(spec.id);
+      return rig?.load().catch(error => {
+        rig.failed = true;
+        console.error(`${spec.type} rig failed to load; using the programmatic fallback.`, error);
+      });
+    });
+    await Promise.all([fallbackImages, ashRig, blueRig, ...creatureLoads]);
     skinEditor?.hydrateMainRig();
     ash?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
+    game.creatures.forEach(creature => creatureRigs.get(creature.id)?.update(0, creature.animation));
     render();
     window.parent?.postMessage({ type: 'bcd:encore:ready' }, '*');
   }
