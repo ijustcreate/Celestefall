@@ -1,7 +1,9 @@
 (() => {
   'use strict';
 
-  if (new URLSearchParams(location.search).get('embed') === '1') document.body.classList.add('is-embedded');
+  if (window.parent !== window || new URLSearchParams(location.search).get('embed') === '1') {
+    document.body.classList.add('is-embedded');
+  }
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d', { alpha: false });
