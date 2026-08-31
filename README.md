@@ -117,6 +117,15 @@ bennyfrancis
 
 [MIT](https://choosealicense.com/licenses/mit/)
 
+## Browser port
+
+This fork adds a dependency-free browser adaptation in [`docs/`](docs/). It
+ports the demo's pixel-step actor movement, jumping, wall cling, drop-through
+platforms, moving solids, and rider carrying to HTML Canvas, with responsive
+touch controls for phones. The original GameMaker project remains intact.
+
+Play the fork: <https://ijustcreate.github.io/Celestefall/>
+
 
 
 
