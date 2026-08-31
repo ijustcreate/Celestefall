@@ -8,11 +8,13 @@
   ctx.imageSmoothingEnabled = false;
 
   const STEP = 1 / 60;
-  const WORLD = { width: 832, height: 384 };
+  // One display tall and exactly three landscape camera widths wide.
+  const WORLD = { width: 1920, height: 360 };
   const VIEW = { width: 640, height: 360 };
   const PLAYER_HALF_W = 7;
   const PLAYER_H = 16;
-  const SPAWN = { x: 384, y: 320 };
+  const PLAYER_CROUCH_H = 10;
+  const SPAWN = { x: 120, y: 328 };
 
   const imageSources = {
     background: 'assets/background.png',
@@ -29,30 +31,50 @@
   const images = {};
 
   const fixed = [
-    { x: 48, y: 48, w: 736, h: 16, kind: 'solid' },
-    { x: 48, y: 64, w: 16, h: 288, kind: 'solid' },
-    { x: 768, y: 64, w: 16, h: 288, kind: 'solid' },
-    { x: 64, y: 352, w: 288, h: 32, kind: 'solid' },
-    { x: 352, y: 320, w: 64, h: 64, kind: 'solid' },
-    { x: 416, y: 352, w: 352, h: 32, kind: 'solid' }
+    { x: 0, y: 0, w: 16, h: 360, kind: 'solid' },
+    { x: 0, y: 328, w: 260, h: 32, kind: 'solid' },
+    { x: 260, y: 312, w: 120, h: 48, kind: 'solid' },
+    { x: 380, y: 328, w: 268, h: 32, kind: 'solid' },
+    { x: 648, y: 344, w: 212, h: 16, kind: 'solid' },
+    { x: 860, y: 320, w: 128, h: 40, kind: 'solid' },
+    { x: 988, y: 336, w: 292, h: 24, kind: 'solid' },
+    { x: 1280, y: 328, w: 168, h: 32, kind: 'solid' },
+    { x: 1448, y: 304, w: 144, h: 56, kind: 'solid' },
+    { x: 1592, y: 328, w: 208, h: 32, kind: 'solid' },
+    { x: 1800, y: 312, w: 120, h: 48, kind: 'solid' },
+    { x: 1904, y: 0, w: 16, h: 360, kind: 'solid' }
+  ];
+
+  const ledges = [
+    { id: 'ledge-1a', x: 72, y: 260, w: 96, h: 7, kind: 'oneway' },
+    { id: 'ledge-1b', x: 430, y: 235, w: 108, h: 7, kind: 'oneway' },
+    { id: 'ledge-2a', x: 690, y: 265, w: 100, h: 7, kind: 'oneway' },
+    { id: 'ledge-2b', x: 1040, y: 224, w: 108, h: 7, kind: 'oneway' },
+    { id: 'ledge-2c', x: 1190, y: 278, w: 82, h: 7, kind: 'oneway' },
+    { id: 'ledge-3a', x: 1340, y: 238, w: 100, h: 7, kind: 'oneway' },
+    { id: 'ledge-3b', x: 1625, y: 248, w: 112, h: 7, kind: 'oneway' },
+    { id: 'ledge-3c', x: 1810, y: 214, w: 80, h: 7, kind: 'oneway' }
   ];
 
   function makeMovers() {
     return [
-      { id: 'west-carrier', x: 176, y: 336, w: 65, h: 7, axis: 'x', min: 160, max: 279, speed: 1, dir: 1, kind: 'solid' },
-      { id: 'east-wall', x: 608, y: 272, w: 65, h: 55, axis: 'y', min: 208, max: 289, speed: 1, dir: -1, kind: 'solid' },
-      { id: 'center-lift', x: 448, y: 304, w: 65, h: 7, axis: 'y', min: 256, max: 320, speed: 1, dir: -1, kind: 'oneway' },
-      { id: 'center-runner', x: 256, y: 304, w: 65, h: 7, axis: 'x', min: 224, max: 328, speed: 1, dir: 1, kind: 'oneway' },
-      { id: 'east-lift', x: 678, y: 225, w: 65, h: 7, axis: 'y', min: 208, max: 320, speed: 1, dir: 1, kind: 'solid' }
+      { id: 'west-lift', x: 205, y: 286, w: 65, h: 7, axis: 'y', min: 220, max: 300, speed: .42, dir: -1, kind: 'oneway' },
+      { id: 'cling-wall', x: 565, y: 258, w: 16, h: 60, axis: 'y', min: 246, max: 266, speed: .24, dir: -1, kind: 'solid' },
+      { id: 'mid-carrier', x: 735, y: 302, w: 65, h: 7, axis: 'x', min: 680, max: 900, speed: .55, dir: 1, kind: 'oneway' },
+      { id: 'center-lift', x: 970, y: 286, w: 65, h: 7, axis: 'y', min: 208, max: 304, speed: .45, dir: -1, kind: 'oneway' },
+      { id: 'east-carrier', x: 1320, y: 284, w: 65, h: 7, axis: 'x', min: 1300, max: 1510, speed: .5, dir: 1, kind: 'oneway' },
+      { id: 'final-lift', x: 1738, y: 290, w: 65, h: 7, axis: 'y', min: 186, max: 300, speed: .4, dir: -1, kind: 'oneway' }
     ];
   }
 
   const input = {
     left: false,
     right: false,
+    up: false,
     down: false,
     grab: false,
-    jumpPressed: false
+    jumpPressed: false,
+    jumpHeld: false
   };
 
   const game = {
@@ -61,7 +83,7 @@
     frame: 0,
     deaths: 0,
     playerName: 'Climber',
-    camera: { x: 64, y: 12 },
+    camera: { x: 0, y: 0 },
     cloudX: 0,
     particles: [],
     movers: makeMovers(),
@@ -80,6 +102,10 @@
       grounded: false,
       clinging: false,
       clingSide: 0,
+      crouching: false,
+      lookingUp: false,
+      coyote: 0,
+      jumpBuffer: 0,
       dropping: 0,
       animation: 'idle',
       animationTime: 0,
@@ -92,15 +118,16 @@
     if (countDeath) game.deaths += 1;
     game.player = freshPlayer();
     game.movers = makeMovers();
-    game.camera.x = 64;
-    game.camera.y = 12;
+    game.camera.x = innerHeight > innerWidth ? SPAWN.x - VIEW.width / 2 : 0;
+    game.camera.y = 0;
     game.particles.length = 0;
     input.jumpPressed = false;
+    input.jumpHeld = false;
     vibrate(countDeath ? 30 : 12);
   }
 
-  function rectAt(x = game.player.x, y = game.player.y) {
-    return { x: x - PLAYER_HALF_W, y: y - PLAYER_H, w: PLAYER_HALF_W * 2, h: PLAYER_H };
+  function rectAt(x = game.player.x, y = game.player.y, height = game.player.crouching ? PLAYER_CROUCH_H : PLAYER_H) {
+    return { x: x - PLAYER_HALF_W, y: y - height, w: PLAYER_HALF_W * 2, h: height };
   }
 
   function overlap(a, b) {
@@ -111,14 +138,14 @@
     return fixed.concat(game.movers.filter(m => includeOneWay || m.kind === 'solid'));
   }
 
-  function collidesSolid(x, y) {
-    const r = rectAt(x, y);
+  function collidesSolid(x, y, height) {
+    const r = rectAt(x, y, height);
     return solids(false).find(s => overlap(r, s)) || null;
   }
 
   function standingSurface(x = game.player.x, y = game.player.y) {
     const feet = rectAt(x, y + 1);
-    for (const s of fixed.concat(game.movers)) {
+    for (const s of fixed.concat(ledges, game.movers)) {
       if (s.kind === 'oneway' && game.player.dropping > 0) continue;
       if (feet.y + feet.h < s.y || feet.y + feet.h > s.y + 2) continue;
       if (feet.x < s.x + s.w && feet.x + feet.w > s.x) return s;
@@ -160,7 +187,7 @@
       if (!solid && direction > 0 && p.dropping <= 0) {
         const next = rectAt(p.x, p.y + direction);
         const previousBottom = p.y;
-        oneWay = game.movers.find(s => s.kind === 'oneway' && previousBottom <= s.y + 1 && overlap(next, s));
+        oneWay = ledges.concat(game.movers).find(s => s.kind === 'oneway' && previousBottom <= s.y + 1 && overlap(next, s));
       }
       if (solid || oneWay) {
         p.vy = 0;
@@ -225,6 +252,12 @@
     game.particles = game.particles.filter(particle => particle.life > 0);
   }
 
+  function approach(value, target, amount) {
+    if (value < target) return Math.min(value + amount, target);
+    if (value > target) return Math.max(value - amount, target);
+    return target;
+  }
+
   function update() {
     if (game.mode !== 'playing') return;
     const p = game.player;
@@ -239,38 +272,63 @@
     const direction = Number(input.right) - Number(input.left);
     if (direction) p.facing = direction;
 
+    p.grounded = standingSurface();
+    if (p.grounded) p.coyote = 7;
+    else p.coyote = Math.max(0, p.coyote - 1);
+    if (input.jumpPressed) p.jumpBuffer = 7;
+    else p.jumpBuffer = Math.max(0, p.jumpBuffer - 1);
+
+    // Down is a true crouch. Down + Jump intentionally drops through pink
+    // one-way platforms, leaving the joystick's down direction useful on land.
+    if (input.down && input.jumpPressed && p.grounded?.kind === 'oneway') {
+      p.dropping = 12;
+      p.y += 5;
+      p.grounded = false;
+      p.jumpBuffer = 0;
+    }
+
+    const wantsCrouch = Boolean(input.down && p.grounded);
+    if (wantsCrouch) p.crouching = true;
+    else if (!collidesSolid(p.x, p.y, PLAYER_H)) p.crouching = false;
+    p.lookingUp = Boolean(input.up && p.grounded && !p.crouching && direction === 0);
+
     const wallSide = sideSurface(1) ? 1 : (sideSurface(-1) ? -1 : 0);
     p.clinging = Boolean(input.grab && wallSide && !p.grounded);
     p.clingSide = p.clinging ? wallSide : 0;
 
-    if (input.down && p.grounded && p.grounded.kind === 'oneway') {
-      p.dropping = 10;
-      p.y += 5;
-      p.grounded = false;
-    }
-
     if (p.clinging) {
       p.vx = 0;
-      p.vy = 0;
+      p.vy = .12;
       p.yRemainder = 0;
-      if (input.jumpPressed) {
+      if (p.jumpBuffer > 0) {
         p.clinging = false;
-        p.vx = -wallSide * 4.5;
-        p.vy = -8;
+        p.vx = -wallSide * 3.8;
+        p.vy = -7.2;
         p.facing = -wallSide;
+        p.jumpBuffer = 0;
         emitDust(p.x + wallSide * 7, p.y - 8, 7);
         vibrate(14);
       }
     } else {
-      p.vx = direction * 3;
-      p.vy = Math.min(p.vy + .5, 6);
-      if (input.jumpPressed && p.grounded) {
-        p.vy = -8;
+      const topSpeed = p.crouching ? .75 : (p.lookingUp ? 0 : 2.25);
+      const targetSpeed = direction * topSpeed;
+      const acceleration = p.grounded ? .3 : .16;
+      const deceleration = p.grounded ? .38 : .09;
+      p.vx = approach(p.vx, targetSpeed, direction ? acceleration : deceleration);
+      if (p.jumpBuffer > 0 && p.coyote > 0 && !p.crouching) {
+        p.vy = -7.2;
+        p.jumpBuffer = 0;
+        p.coyote = 0;
         p.squash = 1.16;
         p.stretch = .86;
         emitDust(p.x, p.y, 6);
         vibrate(12);
-      }
+      } else if (p.grounded) p.vy = 0;
+      else p.vy = Math.min(p.vy + .36, 5.2);
+
+      // Releasing Jump trims upward velocity, which gives short and tall
+      // jumps without changing the single-button mobile layout.
+      if (!input.jumpHeld && p.vy < -3.2) p.vy = approach(p.vy, -3.2, .45);
     }
 
     movePlayerX(p.vx);
@@ -289,7 +347,9 @@
     p.animationTime += STEP;
     if (p.clinging) p.animation = 'cling';
     else if (!p.grounded) p.animation = p.vy < 0 ? 'jump' : 'fall';
-    else if (direction) p.animation = 'run';
+    else if (p.crouching) p.animation = 'crouch';
+    else if (p.lookingUp) p.animation = 'look';
+    else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
 
     if (p.y > WORLD.height + 40) resetGame(true);
@@ -300,10 +360,16 @@
 
   function updateCamera() {
     const p = game.player;
-    const targetX = Math.max(0, Math.min(WORLD.width - VIEW.width, p.x - VIEW.width / 2));
-    const targetY = Math.max(0, Math.min(WORLD.height - VIEW.height, p.y - VIEW.height / 2));
-    game.camera.x += (targetX - game.camera.x) * .12;
-    game.camera.y += (targetY - game.camera.y) * .12;
+    const lookAhead = p.facing * Math.min(46, Math.abs(p.vx) * 18);
+    const portrait = innerHeight > innerWidth;
+    // Portrait CSS deliberately crops the wide canvas to create the requested
+    // zoom. Let the logical camera travel beyond the level bounds there so the
+    // player stays in that central crop at both ends of the map.
+    const minX = portrait ? -VIEW.width / 2 + 24 : 0;
+    const maxX = portrait ? WORLD.width - VIEW.width / 2 - 24 : WORLD.width - VIEW.width;
+    const targetX = Math.max(minX, Math.min(maxX, p.x - VIEW.width / 2 + lookAhead));
+    game.camera.x += (targetX - game.camera.x) * .075;
+    game.camera.y = 0;
   }
 
   function drawBackdrop() {
@@ -317,17 +383,39 @@
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // A restrained three-act skyline makes horizontal progress legible while
+    // remaining behind the original cloud layer.
+    const parallax = game.camera.x * .22;
+    ctx.fillStyle = 'rgba(83,77,103,.12)';
+    for (let worldX = 40; worldX < WORLD.width; worldX += 170) {
+      const x = Math.round(worldX - parallax);
+      const height = 42 + ((worldX / 170) % 3) * 18;
+      ctx.fillRect(x, 190 - height, 54, height);
+      ctx.fillRect(x + 15, 176 - height, 24, 16);
+    }
+
     const cloud = images.clouds;
     if (cloud) {
       const y = 252 - game.camera.y;
       const start = -((game.cloudX + game.camera.x * .2) % cloud.width) - cloud.width;
       for (let x = start; x < canvas.width + cloud.width; x += cloud.width) ctx.drawImage(cloud, Math.round(x), Math.round(y));
     }
+
+    ctx.save();
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(54,53,66,.56)';
+    for (let section = 0; section < 3; section += 1) {
+      const x = section * VIEW.width + VIEW.width / 2 - game.camera.x;
+      if (x > -80 && x < canvas.width + 80) ctx.fillText(`PATH ${section + 1} / 3`, Math.round(x), 116);
+    }
+    ctx.restore();
   }
 
   function drawRockBlock(block) {
     const x = Math.round(block.x - game.camera.x);
     const y = Math.round(block.y - game.camera.y);
+    if (x + block.w < -24 || x > canvas.width + 24) return;
     ctx.fillStyle = '#3b3949';
     ctx.fillRect(x, y, block.w, block.h);
     ctx.fillStyle = '#65627c';
@@ -339,7 +427,7 @@
         ctx.fillStyle = '#65627c';
       }
     }
-    if (block.w > block.h || block.y === 320) {
+    if (block.w > block.h) {
       ctx.fillStyle = '#2f6c63';
       ctx.fillRect(x, y, block.w, 5);
       ctx.fillStyle = '#58a174';
@@ -350,26 +438,31 @@
     }
   }
 
+  function drawThinPlatform(platform) {
+    const x = Math.round(platform.x - game.camera.x);
+    const y = Math.round(platform.y - game.camera.y);
+    if (x + platform.w < -20 || x > canvas.width + 20) return;
+    const image = platform.kind === 'oneway' ? images.platformOneWay : images.platformSolid;
+    if (image) ctx.drawImage(image, x, y, platform.w, platform.h);
+    else {
+      ctx.fillStyle = platform.kind === 'oneway' ? '#ce146c' : '#7f7c92';
+      ctx.fillRect(x, y, platform.w, platform.h);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.fillRect(x + 3, y + 1, Math.max(1, platform.w - 6), 1);
+  }
+
   function drawPlatforms() {
     fixed.forEach(drawRockBlock);
-    for (const platform of game.movers) {
-      const x = Math.round(platform.x - game.camera.x);
-      const y = Math.round(platform.y - game.camera.y);
-      const image = platform.kind === 'oneway' ? images.platformOneWay : images.platformSolid;
-      if (image) ctx.drawImage(image, x, y, platform.w, platform.h);
-      else {
-        ctx.fillStyle = platform.kind === 'oneway' ? '#ce146c' : '#7f7c92';
-        ctx.fillRect(x, y, platform.w, platform.h);
-      }
-      ctx.fillStyle = 'rgba(255,255,255,.45)';
-      ctx.fillRect(x + 3, y + 1, Math.max(1, platform.w - 6), 1);
-    }
+    ledges.forEach(drawThinPlatform);
+    game.movers.forEach(drawThinPlatform);
   }
 
   function playerFrame() {
     const p = game.player;
-    if (p.animation === 'run') return images[`run${Math.floor(p.animationTime * 10) % 6}`];
+    if (p.animation === 'run') return images[`run${Math.floor(p.animationTime * 8.5) % 6}`];
     if (p.animation === 'idle') return images[`idle${Math.floor(p.animationTime * 10) % 5}`];
+    if (p.animation === 'crouch' || p.animation === 'look') return images.idle0;
     return images[p.animation];
   }
 
@@ -377,13 +470,22 @@
     const p = game.player;
     const image = playerFrame();
     if (!image) return;
-    const x = Math.round(p.x - game.camera.x);
+    const x = Math.round((p.x - game.camera.x) * 2) / 2;
     const y = Math.round(p.y - game.camera.y);
     ctx.save();
     ctx.translate(x, y);
-    ctx.scale(p.facing * p.stretch, p.squash);
+    if (p.animation === 'crouch') ctx.scale(p.facing * p.stretch * 1.12, p.squash * .7);
+    else if (p.animation === 'look') ctx.scale(p.facing * p.stretch * .96, p.squash * 1.04);
+    else ctx.scale(p.facing * p.stretch, p.squash);
     ctx.drawImage(image, -image.width / 2, -image.height);
     ctx.restore();
+
+    if (p.animation === 'look') {
+      ctx.fillStyle = '#f4ecd7';
+      ctx.fillRect(Math.round(x - 1), Math.round(y - image.height - 7), 2, 4);
+      ctx.fillRect(Math.round(x - 3), Math.round(y - image.height - 5), 2, 2);
+      ctx.fillRect(Math.round(x + 1), Math.round(y - image.height - 5), 2, 2);
+    }
   }
 
   function drawParticles() {
@@ -428,6 +530,7 @@
   const keyMap = new Map([
     ['ArrowLeft', 'left'], ['KeyA', 'left'],
     ['ArrowRight', 'right'], ['KeyD', 'right'],
+    ['ArrowUp', 'up'], ['KeyW', 'up'],
     ['ArrowDown', 'down'], ['KeyS', 'down'],
     ['ShiftLeft', 'grab'], ['ShiftRight', 'grab'], ['KeyB', 'grab']
   ]);
@@ -437,8 +540,9 @@
       input[keyMap.get(event.code)] = true;
       event.preventDefault();
     }
-    if (!event.repeat && ['ArrowUp', 'KeyW', 'Space'].includes(event.code)) {
+    if (!event.repeat && event.code === 'Space') {
       input.jumpPressed = true;
+      input.jumpHeld = true;
       event.preventDefault();
     }
     if (!event.repeat && event.code === 'KeyR') resetGame();
@@ -452,10 +556,11 @@
 
   window.addEventListener('keyup', event => {
     if (keyMap.has(event.code)) input[keyMap.get(event.code)] = false;
+    if (event.code === 'Space') input.jumpHeld = false;
   });
 
   window.addEventListener('blur', () => {
-    input.left = input.right = input.down = input.grab = false;
+    input.left = input.right = input.up = input.down = input.grab = input.jumpHeld = false;
   });
 
   const joystick = document.getElementById('joystick');
@@ -476,6 +581,7 @@
     joystickKnob.style.transform = `translate(${x}px, ${y}px)`;
     input.left = rawX < -box.width * .12;
     input.right = rawX > box.width * .12;
+    input.up = rawY < -box.height * .16;
     input.down = rawY > box.height * .16;
   }
 
@@ -491,7 +597,7 @@
   function releaseJoystick(event) {
     if (event.pointerId !== joystickPointer) return;
     joystickPointer = null;
-    input.left = input.right = input.down = false;
+    input.left = input.right = input.up = input.down = false;
     joystickKnob.style.transform = 'translate(0, 0)';
   }
   joystick.addEventListener('pointerup', releaseJoystick);
@@ -519,6 +625,7 @@
   bindHeldButton(grabButton, 'grab');
   jumpButton.addEventListener('pointerdown', event => {
     input.jumpPressed = true;
+    input.jumpHeld = true;
     jumpButton.classList.add('is-active');
     jumpButton.setPointerCapture(event.pointerId);
     hideHelpSoon();
@@ -527,6 +634,7 @@
   const releaseJump = event => {
     if (jumpButton.hasPointerCapture?.(event.pointerId)) jumpButton.releasePointerCapture(event.pointerId);
     jumpButton.classList.remove('is-active');
+    input.jumpHeld = false;
   };
   jumpButton.addEventListener('pointerup', releaseJump);
   jumpButton.addEventListener('pointercancel', releaseJump);
@@ -568,8 +676,11 @@
       vy: Number(game.player.vy.toFixed(2)),
       grounded: Boolean(game.player.grounded),
       clinging: game.player.clinging,
+      crouching: game.player.crouching,
+      lookingUp: game.player.lookingUp,
       facing: game.player.facing,
-      animation: game.player.animation
+      animation: game.player.animation,
+      section: Math.min(3, Math.floor(game.player.x / VIEW.width) + 1)
     },
     movingPlatforms: game.movers.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), width: m.w, height: m.h, kind: m.kind })),
     deaths: game.deaths
