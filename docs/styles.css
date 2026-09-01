@@ -367,13 +367,13 @@ body.skin-editor-open .character-carousel { pointer-events: none; }
 .action-button b { display: block; font-size: 28px; line-height: 1; }
 .action-button span { position: absolute; inset: auto 0 -25px; color: #55283b; font-size: 10px; font-weight: 1000; letter-spacing: .08em; }
 .action-button:active, .action-button.is-active { transform: translateY(4px) scale(.97); box-shadow: inset 0 0 0 4px #eadfd6, 0 2px 0 #5b5b5b; }
-.action-button.jump { right: 0; top: 31px; }
+.action-button.jump { right: 0; top: 4px; }
 .action-button.shoot,
 .action-button.dash,
 .action-button.melee { width: 76px; height: 76px; }
-.action-button.melee { left: 0; top: 39px; background: radial-gradient(circle at 34% 25%, #d5a454, #70401f 66%); }
-.action-button.dash { left: 82px; top: 0; background: radial-gradient(circle at 34% 25%, #557cc8, #293963 66%); }
-.action-button.shoot { left: 82px; bottom: 0; background: radial-gradient(circle at 34% 25%, #6d6c7a, #34333d 66%); }
+.action-button.melee { left: 28px; top: auto; bottom: 4px; background: radial-gradient(circle at 34% 25%, #d5a454, #70401f 66%); }
+.action-button.dash { left: 82px; top: 4px; background: radial-gradient(circle at 34% 25%, #557cc8, #293963 66%); }
+.action-button.shoot { left: 110px; bottom: 4px; background: radial-gradient(circle at 34% 25%, #6d6c7a, #34333d 66%); }
 .action-button.shoot b,
 .action-button.dash b,
 .action-button.melee b { font-size: 22px; }
@@ -457,10 +457,10 @@ body.skin-editor-open .character-carousel { pointer-events: none; }
   .action-button.dash,
   .action-button.melee { width: 68px; height: 68px; }
   .action-button { opacity: .82; }
-  .action-button.melee { left: 0; top: 45px; }
+  .action-button.melee { left: 16px; top: auto; bottom: 4px; }
   .action-button.dash { left: 68px; top: 4px; bottom: auto; }
-  .action-button.shoot { left: 68px; top: auto; bottom: 4px; }
-  .action-button.jump { right: 0; top: 36px; }
+  .action-button.shoot { left: 88px; top: auto; bottom: 4px; }
+  .action-button.jump { right: 0; top: 4px; }
   .action-button span { inset-block-end: -18px; color: rgba(255,243,223,.9); text-shadow: 0 1px 2px #1a1520; }
   .skin-editor-content { grid-template-columns: minmax(220px, .7fr) minmax(410px, 1.3fr); }
   .skin-preview-wrap { max-width: 270px; }
@@ -476,10 +476,10 @@ body.skin-editor-open .character-carousel { pointer-events: none; }
   .action-button.shoot,
   .action-button.dash,
   .action-button.melee { width: 64px; height: 64px; }
-  .action-button.melee { left: 0; top: 45px; }
+  .action-button.melee { left: 20px; top: auto; bottom: 4px; }
   .action-button.dash { left: 68px; top: 4px; bottom: auto; }
-  .action-button.shoot { left: 68px; top: auto; bottom: 4px; }
-  .action-button.jump { right: 0; top: 36px; }
+  .action-button.shoot { left: 88px; top: auto; bottom: 4px; }
+  .action-button.jump { right: 0; top: 4px; }
   .action-button span { inset-block-end: -18px; font-size: 9px; }
   .touch-hint { display: none; }
 }

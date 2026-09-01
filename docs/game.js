@@ -26,11 +26,9 @@
   });
 
   const imageSources = {
-    background: 'assets/background.png',
-    clouds: 'assets/clouds.png',
-    platformSolid: 'assets/platform-solid.png',
-    platformOneWay: 'assets/platform-oneway.png',
-    reverser: 'assets/reverser.png',
+    towerBgLeft: 'assets/tower-bg-left.png',
+    towerBgCenter: 'assets/tower-bg-center.png',
+    towerBgRight: 'assets/tower-bg-right.png',
     jump: 'assets/player-jump.png',
     fall: 'assets/player-fall.png',
     cling: 'assets/player-cling.png',
@@ -81,39 +79,48 @@
   ]));
 
   const fixed = [
-    { x: 0, y: 0, w: 16, h: 360, kind: 'solid' },
-    { x: 0, y: 328, w: 260, h: 32, kind: 'solid' },
-    { x: 260, y: 312, w: 120, h: 48, kind: 'solid' },
-    { x: 380, y: 328, w: 268, h: 32, kind: 'solid' },
-    { x: 648, y: 344, w: 212, h: 16, kind: 'solid' },
-    { x: 860, y: 320, w: 128, h: 40, kind: 'solid' },
-    { x: 988, y: 336, w: 292, h: 24, kind: 'solid' },
-    { x: 1280, y: 328, w: 168, h: 32, kind: 'solid' },
-    { x: 1448, y: 304, w: 144, h: 56, kind: 'solid' },
-    { x: 1592, y: 328, w: 208, h: 32, kind: 'solid' },
-    { x: 1800, y: 312, w: 120, h: 48, kind: 'solid' },
-    { x: 1904, y: 0, w: 16, h: 360, kind: 'solid' }
+    { x: 0, y: 0, w: 20, h: 360, kind: 'solid' },
+    { x: 0, y: 336, w: 1920, h: 24, kind: 'solid' },
+    // Low plinths give every chamber a wall-jump anchor without dividing it.
+    { x: 270, y: 304, w: 100, h: 32, kind: 'solid' },
+    { x: 608, y: 288, w: 32, h: 48, kind: 'solid' },
+    { x: 930, y: 304, w: 60, h: 32, kind: 'solid' },
+    { x: 1264, y: 288, w: 32, h: 48, kind: 'solid' },
+    { x: 1550, y: 304, w: 100, h: 32, kind: 'solid' },
+    { x: 1900, y: 0, w: 20, h: 360, kind: 'solid' }
   ];
 
+  // Three readable TowerFall-like combat chambers with 42-58px vertical
+  // steps: high enough to reward routing, low enough for a normal jump.
   const ledges = [
-    { id: 'ledge-1a', x: 72, y: 260, w: 96, h: 7, kind: 'oneway' },
-    { id: 'ledge-1b', x: 430, y: 235, w: 108, h: 7, kind: 'oneway' },
-    { id: 'ledge-2a', x: 690, y: 265, w: 100, h: 7, kind: 'oneway' },
-    { id: 'ledge-2b', x: 1040, y: 224, w: 108, h: 7, kind: 'oneway' },
-    { id: 'ledge-2c', x: 1190, y: 278, w: 82, h: 7, kind: 'oneway' },
-    { id: 'ledge-3a', x: 1340, y: 238, w: 100, h: 7, kind: 'oneway' },
-    { id: 'ledge-3b', x: 1625, y: 248, w: 112, h: 7, kind: 'oneway' },
-    { id: 'ledge-3c', x: 1810, y: 214, w: 80, h: 7, kind: 'oneway' }
+    { id: 'backstage-low-west', x: 54, y: 292, w: 118, h: 8, kind: 'oneway' },
+    { id: 'backstage-low-east', x: 446, y: 292, w: 116, h: 8, kind: 'oneway' },
+    { id: 'backstage-mid-west', x: 126, y: 238, w: 122, h: 8, kind: 'oneway' },
+    { id: 'backstage-mid-east', x: 370, y: 238, w: 122, h: 8, kind: 'oneway' },
+    { id: 'backstage-crown', x: 252, y: 180, w: 116, h: 8, kind: 'oneway' },
+
+    { id: 'opera-low-west', x: 688, y: 292, w: 118, h: 8, kind: 'oneway' },
+    { id: 'opera-low-east', x: 1114, y: 292, w: 118, h: 8, kind: 'oneway' },
+    { id: 'opera-mid-west', x: 770, y: 238, w: 124, h: 8, kind: 'oneway' },
+    { id: 'opera-mid-east', x: 1026, y: 238, w: 124, h: 8, kind: 'oneway' },
+    { id: 'opera-gallery-west', x: 704, y: 184, w: 104, h: 8, kind: 'oneway' },
+    { id: 'opera-gallery-east', x: 1112, y: 184, w: 104, h: 8, kind: 'oneway' },
+    { id: 'opera-crown', x: 886, y: 144, w: 148, h: 8, kind: 'oneway' },
+
+    { id: 'crystal-low-west', x: 1358, y: 292, w: 116, h: 8, kind: 'oneway' },
+    { id: 'crystal-low-east', x: 1748, y: 292, w: 116, h: 8, kind: 'oneway' },
+    { id: 'crystal-mid-west', x: 1428, y: 238, w: 122, h: 8, kind: 'oneway' },
+    { id: 'crystal-mid-east', x: 1672, y: 238, w: 122, h: 8, kind: 'oneway' },
+    { id: 'crystal-crown', x: 1550, y: 180, w: 122, h: 8, kind: 'oneway' }
   ];
 
   function makeMovers() {
     return [
-      { id: 'west-lift', x: 205, y: 286, w: 65, h: 7, axis: 'y', min: 220, max: 300, speed: .42, dir: -1, kind: 'oneway' },
-      { id: 'cling-wall', x: 565, y: 258, w: 16, h: 60, axis: 'y', min: 246, max: 266, speed: .24, dir: -1, kind: 'solid' },
-      { id: 'mid-carrier', x: 735, y: 302, w: 65, h: 7, axis: 'x', min: 680, max: 900, speed: .55, dir: 1, kind: 'oneway' },
-      { id: 'center-lift', x: 970, y: 286, w: 65, h: 7, axis: 'y', min: 208, max: 304, speed: .45, dir: -1, kind: 'oneway' },
-      { id: 'east-carrier', x: 1320, y: 284, w: 65, h: 7, axis: 'x', min: 1300, max: 1510, speed: .5, dir: 1, kind: 'oneway' },
-      { id: 'final-lift', x: 1738, y: 290, w: 65, h: 7, axis: 'y', min: 186, max: 300, speed: .4, dir: -1, kind: 'oneway' }
+      { id: 'backstage-lift', x: 276, y: 276, w: 66, h: 8, axis: 'y', min: 206, max: 288, speed: .42, dir: -1, kind: 'oneway' },
+      { id: 'opera-carrier', x: 820, y: 270, w: 70, h: 8, axis: 'x', min: 808, max: 1032, speed: .5, dir: 1, kind: 'oneway' },
+      { id: 'opera-lift', x: 926, y: 276, w: 68, h: 8, axis: 'y', min: 176, max: 288, speed: .44, dir: -1, kind: 'oneway' },
+      { id: 'crystal-carrier', x: 1450, y: 270, w: 68, h: 8, axis: 'x', min: 1390, max: 1700, speed: .48, dir: 1, kind: 'oneway' },
+      { id: 'crystal-lift', x: 1576, y: 280, w: 68, h: 8, axis: 'y', min: 204, max: 292, speed: .4, dir: -1, kind: 'oneway' }
     ];
   }
 
@@ -1060,68 +1067,62 @@
   screen.orientation?.addEventListener?.('change', recenterAfterLayoutChange);
 
   function drawBackdrop() {
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#363542');
-    gradient.addColorStop(.14, '#363542');
-    gradient.addColorStop(.15, '#e3cca3');
-    gradient.addColorStop(.54, '#e3cca3');
-    gradient.addColorStop(.55, '#d3aaa0');
-    gradient.addColorStop(1, '#d3aaa0');
-    ctx.fillStyle = gradient;
+    ctx.fillStyle = '#090914';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // A restrained three-act skyline makes horizontal progress legible while
-    // remaining behind the original cloud layer.
-    const parallax = game.camera.x * .22;
-    ctx.fillStyle = 'rgba(83,77,103,.12)';
-    for (let worldX = 40; worldX < WORLD.width; worldX += 170) {
-      const x = Math.round(worldX - parallax);
-      const height = 42 + ((worldX / 170) % 3) * 18;
-      ctx.fillRect(x, 190 - height, 54, height);
-      ctx.fillRect(x + 15, 176 - height, 24, 16);
-    }
-
-    const cloud = images.clouds;
-    if (cloud) {
-      const y = 252 - game.camera.y;
-      const start = -((game.cloudX + game.camera.x * .2) % cloud.width) - cloud.width;
-      for (let x = start; x < canvas.width + cloud.width; x += cloud.width) ctx.drawImage(cloud, Math.round(x), Math.round(y));
-    }
-
+    const panels = [images.towerBgLeft, images.towerBgCenter, images.towerBgRight];
     ctx.save();
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = 'rgba(54,53,66,.56)';
-    for (let section = 0; section < 3; section += 1) {
-      const x = section * VIEW.width + VIEW.width / 2 - game.camera.x;
-      if (x > -80 && x < canvas.width + 80) ctx.fillText(`PATH ${section + 1} / 3`, Math.round(x), 116);
-    }
+    // Generated source panels are high-resolution pixel art. Smooth only the
+    // one-time downscale; gameplay sprites return to nearest-neighbor below.
+    ctx.imageSmoothingEnabled = true;
+    panels.forEach((image, section) => {
+      const x = Math.round(section * VIEW.width - game.camera.x);
+      if (!image || x > canvas.width || x + VIEW.width < 0) return;
+      ctx.drawImage(image, x, 0, VIEW.width, VIEW.height);
+    });
     ctx.restore();
+    ctx.imageSmoothingEnabled = false;
+
+    // A restrained selective veil quiets only the lower combat band; the
+    // rose window, curtains, torches and crystal depth stay luminous.
+    const combatVeil = ctx.createLinearGradient(0, 170, 0, 360);
+    combatVeil.addColorStop(0, 'rgba(6,5,13,0)');
+    combatVeil.addColorStop(.55, 'rgba(6,5,13,.14)');
+    combatVeil.addColorStop(1, 'rgba(6,5,13,.32)');
+    ctx.fillStyle = combatVeil;
+    ctx.fillRect(0, 160, canvas.width, 200);
+
+    const vignette = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    vignette.addColorStop(0, 'rgba(3,2,9,.35)');
+    vignette.addColorStop(.12, 'rgba(3,2,9,0)');
+    vignette.addColorStop(.88, 'rgba(3,2,9,0)');
+    vignette.addColorStop(1, 'rgba(3,2,9,.35)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
   function drawRockBlock(block) {
     const x = Math.round(block.x - game.camera.x);
     const y = Math.round(block.y - game.camera.y);
     if (x + block.w < -24 || x > canvas.width + 24) return;
-    ctx.fillStyle = '#3b3949';
+    ctx.fillStyle = '#171522';
     ctx.fillRect(x, y, block.w, block.h);
-    ctx.fillStyle = '#65627c';
+    ctx.fillStyle = '#322b42';
     for (let py = y + 2; py < y + block.h; py += 10) {
       for (let px = x + ((py / 10) % 2 ? 2 : 8); px < x + block.w; px += 14) {
         ctx.fillRect(px, py, 5, 4);
-        ctx.fillStyle = '#7d7896';
+        ctx.fillStyle = '#59445f';
         ctx.fillRect(px + 1, py, 3, 1);
-        ctx.fillStyle = '#65627c';
+        ctx.fillStyle = '#322b42';
       }
     }
     if (block.w > block.h) {
-      ctx.fillStyle = '#2f6c63';
-      ctx.fillRect(x, y, block.w, 5);
-      ctx.fillStyle = '#58a174';
-      for (let px = x; px < x + block.w; px += 8) {
-        ctx.fillRect(px, y, 6, 2);
-        ctx.fillRect(px + 2, y + 2, 3, 3);
-      }
+      ctx.fillStyle = '#c08a3f';
+      ctx.fillRect(x, y, block.w, 2);
+      ctx.fillStyle = '#6d203d';
+      ctx.fillRect(x, y + 2, block.w, 4);
+      ctx.fillStyle = '#d8aa57';
+      for (let px = x + 4; px < x + block.w; px += 14) ctx.fillRect(px, y + 2, 3, 2);
     }
   }
 
@@ -1129,14 +1130,16 @@
     const x = Math.round(platform.x - game.camera.x);
     const y = Math.round(platform.y - game.camera.y);
     if (x + platform.w < -20 || x > canvas.width + 20) return;
-    const image = platform.kind === 'oneway' ? images.platformOneWay : images.platformSolid;
-    if (image) ctx.drawImage(image, x, y, platform.w, platform.h);
-    else {
-      ctx.fillStyle = platform.kind === 'oneway' ? '#ce146c' : '#7f7c92';
-      ctx.fillRect(x, y, platform.w, platform.h);
-    }
-    ctx.fillStyle = 'rgba(255,255,255,.45)';
-    ctx.fillRect(x + 3, y + 1, Math.max(1, platform.w - 6), 1);
+    ctx.fillStyle = '#160f1b';
+    ctx.fillRect(x - 1, y - 1, platform.w + 2, platform.h + 3);
+    ctx.fillStyle = '#d2a04e';
+    ctx.fillRect(x, y, platform.w, 2);
+    ctx.fillStyle = '#7f254a';
+    ctx.fillRect(x, y + 2, platform.w, Math.max(3, platform.h - 2));
+    ctx.fillStyle = '#b64d6f';
+    ctx.fillRect(x + 4, y + 3, Math.max(1, platform.w - 8), 1);
+    ctx.fillStyle = '#3b2039';
+    for (let px = x + 6; px < x + platform.w - 4; px += 16) ctx.fillRect(px, y + platform.h, 5, 2);
   }
 
   function drawPlatforms() {
