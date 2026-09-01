@@ -39,10 +39,18 @@
   };
   const images = {};
   const ash = window.AshCharacter ? new window.AshCharacter(ctx) : null;
-  const skinEditor = window.AshSkinEditor && ash ? new window.AshSkinEditor(ash) : null;
+  const playerTwoRig = window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, {
+    assetName: 'Player2',
+    basePath: 'assets/player2'
+  }) : null;
   const botRig = window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, {
     assetName: 'Player2',
     basePath: 'assets/player2'
+  }) : null;
+  const pixelRenderer = window.PixelCharacterRenderer ? new window.PixelCharacterRenderer(ctx) : null;
+  const skinEditor = window.PixelCharacterStudio && pixelRenderer ? new window.PixelCharacterStudio({
+    renderer: pixelRenderer,
+    legacyRigs: { ash, p2: playerTwoRig }
   }) : null;
   const BAT_ANIMATIONS = {
     idle: { name: 'idle', loop: true },
@@ -1012,7 +1020,7 @@
     else if (p.lookingUp) p.animation = 'look';
     else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
-    ash?.update(STEP, p.animation);
+    skinEditor?.activeRig?.()?.update(STEP, p.animation);
 
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
@@ -1149,8 +1157,14 @@
     const p = game.player;
     const x = Math.round((p.x - game.camera.x) * 2) / 2;
     const y = Math.round(p.y - game.camera.y);
-    if (ash?.ready) {
-      ash.draw(x, y, p.facing, p.stretch, p.squash);
+    const selectedCharacter = skinEditor?.activeCharacter?.();
+    if (selectedCharacter?.kind === 'pixel' && pixelRenderer) {
+      pixelRenderer.draw(selectedCharacter, x, y, p.facing, p.animation, p.animationTime, 1.5, p.stretch, p.squash);
+      return;
+    }
+    const selectedRig = skinEditor?.activeRig?.() || ash;
+    if (selectedRig?.ready) {
+      selectedRig.draw(x, y, p.facing, p.stretch, p.squash);
       return;
     }
 
@@ -1511,8 +1525,9 @@
       lookingUp: game.player.lookingUp,
       facing: game.player.facing,
       animation: game.player.animation,
-      character: ash?.ready ? 'Ash' : (ash?.failed ? 'Pirate fallback' : 'Ash loading'),
-      rigAnimation: ash?.currentAnimation || null,
+      character: skinEditor?.activeCharacter?.()?.name || (ash?.ready ? 'Ash' : 'Fallback'),
+      characterKind: skinEditor?.activeCharacter?.()?.kind || 'legacy',
+      rigAnimation: skinEditor?.activeRig?.()?.currentAnimation || null,
       shooting: game.player.shootTimer > 0,
       aiming: game.player.aiming,
       aim: { x: Number(game.player.aimX.toFixed(2)), y: Number(game.player.aimY.toFixed(2)) },
@@ -1609,6 +1624,10 @@
       ash.failed = true;
       console.error('Ash character failed to load; using the pirate fallback.', error);
     });
+    const selectableBlueRig = playerTwoRig?.load().catch(error => {
+      playerTwoRig.failed = true;
+      console.error('Selectable Player 2 failed to load; custom fighters and Ash still work.', error);
+    });
     const blueRig = botRig?.load().catch(error => {
       botRig.failed = true;
       console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
@@ -1620,9 +1639,9 @@
         console.error(`${spec.type} rig failed to load; using the programmatic fallback.`, error);
       });
     });
-    await Promise.all([fallbackImages, ashRig, blueRig, ...creatureLoads]);
+    await Promise.all([fallbackImages, ashRig, selectableBlueRig, blueRig, ...creatureLoads]);
     skinEditor?.hydrateMainRig();
-    ash?.update(0, game.player.animation);
+    skinEditor?.activeRig?.()?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
     game.creatures.forEach(creature => creatureRigs.get(creature.id)?.update(0, creature.animation));
     render();

@@ -122,7 +122,7 @@ button { font: inherit; }
 
 .skin-editor-panel {
   position: relative;
-  width: min(760px, 100%);
+  width: min(980px, 100%);
   max-height: 100%;
   overflow: auto;
   border: 2px solid #9d7b48;
@@ -158,7 +158,7 @@ button { font: inherit; }
   font-size: 27px;
 }
 
-.skin-editor-content { display: grid; grid-template-columns: minmax(270px, .9fr) minmax(300px, 1.1fr); gap: 16px; padding: 16px; }
+.skin-editor-content { display: grid; grid-template-columns: minmax(270px, .8fr) minmax(420px, 1.2fr); gap: 16px; padding: 16px; }
 .skin-preview-wrap { display: grid; align-content: start; gap: 10px; }
 #skinPreview {
   display: block;
@@ -192,7 +192,7 @@ button { font: inherit; }
 .skin-editor input[type="color"] { width: 38px; height: 30px; flex: 0 0 38px; border: 0; border-radius: 5px; padding: 0; background: transparent; }
 .skin-editor-status { min-height: 30px; margin: 0; color: #bcb09c; font-size: 10px; line-height: 1.45; }
 .skin-editor-status.is-error { color: #ff8f9d; }
-.skin-editor-actions { display: grid; grid-template-columns: auto auto 1fr; gap: 8px; }
+.skin-editor-actions { display: grid; grid-template-columns: auto auto auto 1fr; gap: 8px; }
 .skin-editor-actions button {
   min-height: 40px;
   border: 1px solid #715b78;
@@ -207,6 +207,65 @@ button { font: inherit; }
 }
 .skin-editor-actions button:disabled { opacity: .38; }
 .skin-editor-actions .skin-save { border-color: #e2b85d; color: #27151f; background: linear-gradient(#ffe291, #d5a340); }
+
+.character-carousel {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  top: max(12px, env(safe-area-inset-top));
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 34px minmax(108px, auto) 34px;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.character-carousel button {
+  min-height: 36px;
+  border: 1px solid rgba(230,187,102,.7);
+  border-radius: 7px;
+  color: #ffe7ad;
+  background: rgba(32,23,42,.82);
+  box-shadow: 0 3px 0 rgba(16,11,23,.52);
+  font-weight: 900;
+}
+
+.character-carousel > button:not(.character-current) { font-size: 24px; }
+.character-current { display: grid; align-content: center; gap: 1px; padding: 3px 10px; }
+.character-current small { color: #d4a74e; font-size: 7px; letter-spacing: .18em; }
+.character-current strong { max-width: 170px; overflow: hidden; color: #fff2ce; font-size: 10px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.character-carousel[data-kind="pixel"] .character-current { border-color: #f2cc6a; background: linear-gradient(145deg, rgba(91,53,95,.92), rgba(35,22,43,.92)); }
+
+.studio-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.studio-tabs button,
+.paint-tools button,
+.paint-actions button {
+  min-height: 34px;
+  border: 1px solid #65506e;
+  border-radius: 6px;
+  color: #d8c79d;
+  background: #211829;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.studio-tabs button.is-active,
+.paint-tools button.is-active { border-color: #e0b45d; color: #231523; background: #e0b45d; }
+.studio-pane { display: grid; gap: 10px; }
+.studio-pane[hidden] { display: none; }
+.module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.color-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+.protected-note { margin: 0; padding: 9px 10px; border-left: 3px solid #d8ad5c; color: #b8a990; background: rgba(216,173,92,.07); font-size: 9px; line-height: 1.45; }
+.paint-pane { grid-template-columns: minmax(205px, .9fr) minmax(190px, 1.1fr); align-items: start; }
+.paint-toolbar { display: grid; gap: 9px; }
+.paint-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.paint-toolbar > label:last-child { grid-template-columns: 1fr auto; align-items: center; }
+#pixelPaint { grid-row: span 2; display: block; width: min(100%, 270px); aspect-ratio: 3 / 4; justify-self: center; border: 2px solid #9d7b48; border-radius: 7px; background: #100d19; image-rendering: pixelated; touch-action: none; }
+.paint-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+
+body.skin-editor-open .touch-controls,
+body.skin-editor-open .character-carousel { pointer-events: none; }
 
 .help-card {
   position: absolute;
@@ -345,6 +404,14 @@ button { font: inherit; }
   .skin-preview-wrap { grid-template-columns: minmax(145px, .8fr) minmax(130px, 1fr); align-items: end; }
   #skinPreview { max-height: 238px; object-fit: contain; }
   .skin-editor fieldset { grid-template-columns: 1fr 1fr; }
+  .skin-editor-header { padding-block: 9px; }
+  .skin-editor-header h1 { font-size: 23px; }
+  .module-grid { grid-template-columns: 1fr 1fr; }
+  .color-grid { grid-template-columns: 1fr 1fr !important; }
+  .paint-pane { grid-template-columns: 1fr; }
+  #pixelPaint { width: min(100%, 240px); }
+  .skin-editor-actions { grid-template-columns: repeat(3, 1fr); }
+  .skin-editor-actions .skin-save { grid-column: 1 / -1; }
 }
 
 @media (orientation: landscape) and (pointer: coarse) {
@@ -395,6 +462,9 @@ button { font: inherit; }
   .action-button.dash { left: 152px; top: 0; bottom: auto; }
   .action-button.jump { right: 0; top: 0; }
   .action-button span { inset-block-end: -18px; color: rgba(255,243,223,.9); text-shadow: 0 1px 2px #1a1520; }
+  .skin-editor-content { grid-template-columns: minmax(220px, .7fr) minmax(410px, 1.3fr); }
+  .skin-preview-wrap { max-width: 270px; }
+  .skin-editor { touch-action: pan-y; }
 }
 
 @media (max-width: 520px) {
