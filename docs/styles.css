@@ -70,7 +70,7 @@ button { font: inherit; }
   font-size: clamp(11px, 2.8vw, 16px);
 }
 
-.brand span {
+.brand small {
   display: block;
   margin-top: 3px;
   color: #ead7a8;
@@ -468,6 +468,14 @@ body.skin-editor-open .character-carousel { pointer-events: none; }
 }
 
 @media (max-width: 520px) {
+  .brand {
+    width: 84px;
+    font-size: 8px;
+    line-height: 1.25;
+    letter-spacing: .12em;
+  }
+  .brand-title span { display: block; }
+  .brand small { font-size: .52em; letter-spacing: .16em; }
   .touch-controls { min-height: 178px; padding-inline: 10px; gap: 4px; }
   .joystick { width: 120px; height: 120px; flex-basis: 120px; }
   .joystick-knob { left: 28px; top: 28px; }
