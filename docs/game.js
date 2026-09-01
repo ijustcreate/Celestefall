@@ -794,7 +794,7 @@
       x = Number(input.right) - Number(input.left);
       y = Number(input.down) - Number(input.up);
     }
-    if (Math.hypot(x, y) < .12) return { x: p.aimX || p.facing, y: p.aimY || 0 };
+    if (Math.hypot(x, y) < .12) return { x: p.facing, y: 0 };
     const length = Math.hypot(x, y);
     return { x: x / length, y: y / length };
   }
@@ -883,6 +883,8 @@
       p.shootTimer = 15;
       p.shootCooldown = 16;
       p.aiming = false;
+      p.aimX = p.facing;
+      p.aimY = 0;
       vibrate(9);
     }
     if (!input.shootHeld && !input.shootReleased) p.aiming = false;
