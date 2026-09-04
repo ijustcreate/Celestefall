@@ -41,6 +41,30 @@
     ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`run${i}`, `assets/player-run-${i}.png`]))
   };
   const images = {};
+  let backgroundLayer = null;
+  let staticPlatformLayer = null;
+  let viewportShadeLayer = null;
+
+  function makeNoteSprite(fill, stroke) {
+    const surface = document.createElement('canvas');
+    surface.width = 32;
+    surface.height = 32;
+    const context = surface.getContext('2d');
+    context.font = 'bold 15px Georgia, serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineWidth = 2;
+    context.strokeStyle = stroke;
+    context.fillStyle = fill;
+    context.strokeText('♪', 16, 16);
+    context.fillText('♪', 16, 16);
+    return surface;
+  }
+
+  const noteSprites = {
+    player: makeNoteSprite('#ce146c', '#363542'),
+    bot: makeNoteSprite('#2267c9', '#363542')
+  };
   const ash = window.AshCharacter ? new window.AshCharacter(ctx) : null;
   const playerTwoRig = window.BulletAgeCharacter ? new window.BulletAgeCharacter(ctx, {
     assetName: 'Player2',
@@ -57,6 +81,8 @@
   const PLAYER_COLORS = Object.freeze([
     '#e85d5d', '#4fa3ff', '#65cf84', '#f2c14e', '#b77bff', '#ef75b5', '#f28a4b', '#4ed1c5'
   ]);
+  const PLAYER_RESPAWN_FRAMES = 180;
+  const CAPTURE_FRAMES = 180;
   const BAT_ANIMATIONS = {
     idle: { name: 'idle', loop: true },
     run: { name: 'fly', loop: true },
@@ -187,6 +213,7 @@
     remotePlayers: new Map(),
     capturedZones: new Map(),
     captureProgress: new Map(),
+    respawnBursts: [],
     room: null,
     roomCount: 0
   };
@@ -232,6 +259,9 @@
       hitTimer: 0,
       health: 3,
       maxHealth: 3,
+      alive: true,
+      respawnTimer: 0,
+      respawnPulse: 0,
       invulnerable: 0,
       animation: 'idle',
       animationTime: 0,
@@ -304,6 +334,7 @@
     game.camera.y = 0;
     game.particles.length = 0;
     game.projectiles.length = 0;
+    game.respawnBursts.length = 0;
     input.jumpPressed = false;
     input.jumpHeld = false;
     input.shootHeld = false;
@@ -479,6 +510,8 @@
       particle.life -= 1;
     }
     game.particles = game.particles.filter(particle => particle.life > 0);
+    for (const burst of game.respawnBursts) burst.life -= 1;
+    game.respawnBursts = game.respawnBursts.filter(burst => burst.life > 0);
   }
 
   function approach(value, target, amount) {
@@ -556,7 +589,7 @@
 
   function hitPlayer(knockbackX, knockbackY) {
     const player = game.player;
-    if (player.invulnerable > 0) return false;
+    if (!player.alive || player.invulnerable > 0) return false;
     player.health -= 1;
     player.invulnerable = 45;
     player.vx = knockbackX;
@@ -566,11 +599,25 @@
     vibrate([16, 24, 16]);
     if (player.health <= 0) {
       game.deaths += 1;
-      game.player = freshPlayer();
-      game.player.invulnerable = 90;
+      player.alive = false;
+      player.health = 0;
+      player.respawnTimer = PLAYER_RESPAWN_FRAMES;
+      player.animation = 'death';
+      player.animationTime = 0;
+      player.vx = knockbackX * .35;
+      player.vy = Math.min(knockbackY, -2.8);
+      emitDust(player.x, player.y - 17, 20);
       game.room?.send('eliminated', { victimId: game.room.player.id, killerId: game.lastAttacker || null });
     }
     return true;
+  }
+
+  function respawnPlayer() {
+    game.player = freshPlayer();
+    game.player.invulnerable = 90;
+    game.player.respawnPulse = 32;
+    emitRespawnBurst(game.player.x, game.player.y, game.loadout.color);
+    vibrate([10, 18, 12]);
   }
 
   function creatureRect(creature) {
@@ -624,7 +671,7 @@
   function creatureAttackRect(creature) {
     if (creature.type === 'bat') {
       const rect = creatureRect(creature);
-      return { x: rect.x - 5, y: rect.y - 5, w: rect.w + 10, h: rect.h + 10 };
+      return { x: rect.x - 12, y: rect.y - 12, w: rect.w + 24, h: rect.h + 24 };
     }
     return {
       x: creature.facing > 0 ? creature.x + 2 : creature.x - 38,
@@ -702,9 +749,14 @@
       creature.y = Math.max(76, Math.min(WORLD.height - 48, creature.y));
     }
 
-    if (creatureAttackCanHit(creature) && !creature.attackConnected && overlap(creatureAttackRect(creature), rectAt())) {
-      creature.attackConnected = true;
-      hitPlayer(creature.facing * (creature.type === 'bat' ? 2.9 : 2.5), creature.type === 'bat' ? 2.4 : -2.2);
+    if (creatureAttackCanHit(creature) && !creature.attackConnected && player.alive) {
+      // A diving bat's artwork is broader than its old collision box. This
+      // impact radius makes a visible dive reliably connect once per attack.
+      const batContact = creature.type === 'bat' && Math.hypot(player.x - creature.x, (player.y - 18) - (creature.y - 12)) < 45;
+      if (batContact || overlap(creatureAttackRect(creature), rectAt())) {
+        creature.attackConnected = true;
+        hitPlayer(creature.facing * (creature.type === 'bat' ? 2.9 : 2.5), creature.type === 'bat' ? 2.4 : -2.2);
+      }
     }
 
     if (creature.hitTimer > 0) creature.animation = 'hit';
@@ -869,9 +921,9 @@
 
       if (note.owner === 'player' && note.life > 0) {
         for (const remote of game.remotePlayers.values()) {
-          if (remote.alive !== false && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, { x: remote.x - 9, y: remote.y - 34, w: 18, h: 34 })) {
+          if (remote.alive !== false && remote.color !== game.loadout.color && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, { x: remote.x - 9, y: remote.y - 34, w: 18, h: 34 })) {
             note.life = 0;
-            game.room?.send('hit', { targetId: remote.id, attackerId: game.room.player.id, x: Math.sign(note.vx || game.player.facing) * 2.8, y: -2.5 });
+            game.room?.send('hit', { targetId: remote.id, attackerId: game.room.player.id, attackerColor: game.loadout.color, x: Math.sign(note.vx || game.player.facing) * 2.8, y: -2.5 });
             break;
           }
         }
@@ -949,25 +1001,47 @@
     }
   }
 
+  function captureRoster(zone, color) {
+    const members = [];
+    const player = game.player;
+    if (player.alive && game.loadout.color === color && player.x >= zone.x && player.x <= zone.x + zone.w && player.y >= zone.y && player.y <= zone.y + zone.h) {
+      members.push({ id: game.room?.player.id || 'local', name: game.playerName });
+    }
+    for (const remote of game.remotePlayers.values()) {
+      if (remote.alive === false || remote.color !== color) continue;
+      if (remote.x >= zone.x && remote.x <= zone.x + zone.w && remote.y >= zone.y && remote.y <= zone.y + zone.h) members.push({ id: remote.id, name: remote.name || 'PLAYER' });
+    }
+    return members;
+  }
+
   function updateCaptureZones() {
     const player = game.player;
+    if (!player.alive) return;
     for (const zone of CAPTURE_ZONES) {
-      if (game.capturedZones.has(zone.id)) continue;
-      const inside = player.x >= zone.x && player.x <= zone.x + zone.w && player.y >= zone.y && player.y <= zone.y + zone.h;
-      const progress = inside ? Math.min(180, (game.captureProgress.get(zone.id) || 0) + 1) : Math.max(0, (game.captureProgress.get(zone.id) || 0) - 2);
+      const captured = game.capturedZones.get(zone.id);
+      // Player color is the team assignment. Friendly zones stay captured;
+      // another color must hold the room to replace its color and roster.
+      if (captured?.color === game.loadout.color) { game.captureProgress.set(zone.id, 0); continue; }
+      const contributors = captureRoster(zone, game.loadout.color);
+      const progress = contributors.length ? Math.min(CAPTURE_FRAMES, (game.captureProgress.get(zone.id) || 0) + contributors.length) : Math.max(0, (game.captureProgress.get(zone.id) || 0) - 2);
       game.captureProgress.set(zone.id, progress);
-      if (progress === 180) {
-        const captured = { id: zone.id, ownerId: game.room?.player.id || 'local', owner: game.playerName, color: game.loadout.color };
-        game.capturedZones.set(zone.id, captured);
-        game.room?.send('capture', captured);
+      if (progress === CAPTURE_FRAMES) {
+        const nextCapture = { id: zone.id, color: game.loadout.color, contributors, capturedAt: Date.now() };
+        game.capturedZones.set(zone.id, nextCapture);
+        game.room?.send('capture', nextCapture);
         emitGameEvent('capture_point', { zone: zone.id });
       }
     }
   }
 
+  function emitRespawnBurst(x, y, color) {
+    game.respawnBursts.push({ x, y, color, life: 32, maxLife: 32 });
+    emitDust(x, y - 18, 18);
+  }
+
   function publishRoomState() {
     const p = game.player;
-    game.room?.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: true });
+    game.room?.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: p.alive, respawnTimer: p.respawnTimer });
   }
 
   function connectRoom(config) {
@@ -979,7 +1053,15 @@
     game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); game.remotePlayers.set(member.id, { ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
     game.room.addEventListener('leave', event => game.remotePlayers.delete(event.detail?.id));
     game.room.addEventListener('state', event => { const remote = event.detail; if (!remote?.id || remote.id === game.room.player.id) return; game.remotePlayers.set(remote.id, { ...(game.remotePlayers.get(remote.id) || {}), ...remote }); });
-    game.room.addEventListener('hit', event => { const hit = event.detail; if (hit?.targetId === game.room.player.id) { game.lastAttacker = hit.attackerId; hitPlayer(hit.x || 0, hit.y || -2); } });
+    game.room.addEventListener('hit', event => {
+      const hit = event.detail;
+      // Roster color is the team key, so friendly fire cannot turn a shared
+      // capture team into an accidental deathmatch.
+      if (hit?.targetId === game.room.player.id && hit.attackerColor !== game.loadout.color) {
+        game.lastAttacker = hit.attackerId;
+        hitPlayer(hit.x || 0, hit.y || -2);
+      }
+    });
     game.room.addEventListener('eliminated', event => { const result = event.detail; if (result?.killerId === game.room.player.id) { game.kills += 1; emitGameEvent('first_pk', { victimId: result.victimId }); } });
     game.room.addEventListener('capture', event => { const captured = event.detail; if (captured?.id) game.capturedZones.set(captured.id, captured); });
     game.room.addEventListener('full', () => { game.room.leave(); setRoomStatus('ROOM FULL · 8/8'); });
@@ -1002,8 +1084,23 @@
     p.dashTimer = Math.max(0, p.dashTimer - 1);
     p.dashCooldown = Math.max(0, p.dashCooldown - 1);
     p.hitTimer = Math.max(0, p.hitTimer - 1);
+    p.respawnPulse = Math.max(0, p.respawnPulse - 1);
 
     movePlatforms();
+
+    if (!p.alive) {
+      p.respawnTimer = Math.max(0, p.respawnTimer - 1);
+      p.animationTime += STEP;
+      if (p.respawnTimer <= 0) respawnPlayer();
+      updateParticles();
+      updateBot();
+      updateCreatures();
+      updateProjectiles();
+      publishRoomState();
+      updateCamera();
+      input.jumpPressed = input.shootReleased = input.meleePressed = input.dashPressed = false;
+      return;
+    }
 
     const movementDirection = Number(input.right) - Number(input.left);
     if (input.shootHeld) {
@@ -1157,7 +1254,7 @@
     else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
     p.invulnerable = Math.max(0, p.invulnerable - 1);
-    if (p.y > WORLD.height + 40) resetGame(true);
+    if (p.y > WORLD.height + 40) hitPlayer(0, -3);
     updateParticles();
     updateBot();
     updateCreatures();
@@ -1197,6 +1294,12 @@
   screen.orientation?.addEventListener?.('change', recenterAfterLayoutChange);
 
   function drawBackdrop() {
+    if (backgroundLayer) {
+      const sourceX = Math.max(0, Math.min(WORLD.width - VIEW.width, Math.round(game.camera.x)));
+      ctx.drawImage(backgroundLayer, sourceX, 0, VIEW.width, VIEW.height, 0, 0, canvas.width, canvas.height);
+      if (viewportShadeLayer) ctx.drawImage(viewportShadeLayer, 0, 0);
+      return;
+    }
     ctx.fillStyle = '#090914';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1280,9 +1383,9 @@
 
   function drawCaptureZones() {
     for (const zone of CAPTURE_ZONES) {
-      const x = Math.round(zone.x - game.camera.x), progress = (game.captureProgress.get(zone.id) || 0) / 180, captured = game.capturedZones.get(zone.id);
+      const x = Math.round(zone.x - game.camera.x), progress = (game.captureProgress.get(zone.id) || 0) / CAPTURE_FRAMES, captured = game.capturedZones.get(zone.id);
       ctx.fillStyle = captured?.color || 'rgba(240,194,88,.2)';
-      ctx.globalAlpha = captured ? .24 : .12 + progress * .18;
+      ctx.globalAlpha = captured ? .36 : .12 + progress * .18;
       ctx.fillRect(x, zone.y, zone.w, zone.h);
       ctx.globalAlpha = 1;
       ctx.strokeStyle = captured?.color || '#e5bb58';
@@ -1291,6 +1394,26 @@
       ctx.setLineDash([]);
       ctx.fillStyle = '#ffe8a6'; ctx.font = 'bold 7px ui-monospace, monospace'; ctx.textAlign = 'center';
       ctx.fillText(captured ? `${zone.label} ✓` : `${zone.label} ${Math.round(progress * 100)}%`, x + zone.w / 2, zone.y + 11);
+      if (captured?.contributors?.length) {
+        const names = captured.contributors.map(member => member.name).join(' + ');
+        const label = names.length > 15 ? `${names.slice(0, 14)}…` : names;
+        ctx.fillStyle = '#fff6d5'; ctx.font = 'bold 6px ui-monospace, monospace';
+        ctx.fillText(label, x + zone.w / 2, zone.y + zone.h - 6);
+      }
+    }
+  }
+
+  function drawRespawnEffects() {
+    for (const burst of game.respawnBursts) {
+      const progress = 1 - burst.life / burst.maxLife;
+      const x = burst.x - game.camera.x;
+      const y = burst.y - 17;
+      ctx.save();
+      ctx.globalAlpha = (1 - progress) * .85;
+      ctx.strokeStyle = burst.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, 8 + progress * 30, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -1320,6 +1443,18 @@
     const p = game.player;
     const x = Math.round((p.x - game.camera.x) * 2) / 2;
     const y = Math.round(p.y - game.camera.y);
+    if (!p.alive) {
+      ctx.save();
+      ctx.globalAlpha = .78;
+      ctx.strokeStyle = game.loadout.color;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(x, y - 17, 18, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#fff1c2'; ctx.font = 'bold 8px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`RETURNING ${Math.max(1, Math.ceil(p.respawnTimer / 60))}`, x, y - 50);
+      ctx.restore();
+      return;
+    }
     const selectedRig = activePlayerRig();
     if (selectedRig?.ready) {
       prepareRigForRender(selectedRig, p.animation);
@@ -1472,6 +1607,7 @@
     drawBackdrop();
     drawPlatforms();
     drawCaptureZones();
+    drawRespawnEffects();
     drawParticles();
     drawProjectiles();
     drawCreatures();
@@ -1688,6 +1824,8 @@
       character: game.loadout.character === 'p2' ? 'P2' : 'Ash',
       color: game.loadout.color,
       health: game.player.health,
+      alive: game.player.alive,
+      respawnTimer: game.player.respawnTimer,
       rigAnimation: activePlayerRig()?.currentAnimation || null,
       shooting: game.player.shootTimer > 0,
       aiming: game.player.aiming,
@@ -1730,7 +1868,10 @@
     botKnockouts: game.kills,
     creatureKnockouts: game.creatureKills,
     room: { players: game.roomCount, connected: Boolean(game.room?.connected), remotes: [...game.remotePlayers.values()].map(player => ({ id:player.id, name:player.name, x:Math.round(player.x), y:Math.round(player.y) })) },
-    captureZones: CAPTURE_ZONES.map(zone => ({ id:zone.id, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), capturedBy:game.capturedZones.get(zone.id)?.owner || null }))
+    captureZones: CAPTURE_ZONES.map(zone => {
+      const captured = game.capturedZones.get(zone.id);
+      return { id:zone.id, color:captured?.color || null, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), capturedBy:captured?.contributors?.map(member => member.name) || [] };
+    })
   });
 
   // Local-only deterministic combat hooks keep production closed while the
@@ -1747,6 +1888,30 @@
         game.player.vx = 0;
         game.player.vy = 0;
         updateCamera(true);
+      },
+      hitPlayer(amount = 1) {
+        let result = false;
+        for (let index = 0; index < amount; index += 1) {
+          game.player.invulnerable = 0;
+          result = hitPlayer(-2, -2.5) || result;
+        }
+        return result;
+      },
+      setColor(color) {
+        setLoadout(game.loadout.character, color);
+      },
+      captureZone(id) {
+        const zone = CAPTURE_ZONES.find(candidate => candidate.id === id);
+        if (!zone) return false;
+        game.player.invulnerable = 999;
+        // Keep the player inside only for deterministic QA; live capture is
+        // still driven one frame at a time by normal physics above.
+        for (let frame = 0; frame < CAPTURE_FRAMES; frame += 1) {
+          game.player.x = zone.x + zone.w / 2;
+          game.player.y = zone.y + zone.h / 2;
+          updateCaptureZones();
+        }
+        return true;
       }
     };
   }

@@ -1,5 +1,12 @@
 Original prompt: I’m not liking what we have. For now make me my own copy of this Celestefall on GitHub And get it running in place of what we have.
 
+## 2026-09-03 — Encore Royale combat and color-team pass
+
+- Replaced the bat's overly narrow dive collision with a matching radius-based impact check, so a visible dive now reliably lands one hit.
+- Player knockouts now hold the fallen location for a visible, exact three-second `RETURNING 3…2…1` countdown; respawn arrives with an invulnerability window, colored expanding-ring spotlight effect, sparks, and haptics.
+- Capture points now use roster color as the team identity: same-color players cannot damage each other, capture together faster when standing in the zone, and share an already-owned point. A different color (including after changing your own color) can fully retake a point.
+- Captured zones retain their capturing roster, display the team color and short contributor names in-world, and replace the full roster only when another color completes a takeover.
+
 - Forked `bennyfrancis/Celestefall` to `ijustcreate/Celestefall`, preserving the original GameMaker project and MIT license.
 - Added a dependency-free browser adaptation under `docs/` with the original demo art, pixel-step movement, jumping, wall cling/jump, one-way drop-through, moving solids, rider carrying, camera follow, particles, pause/reset/fullscreen, keyboard controls, and responsive touch controls.
 - Added BCD iframe ready/init/close messaging plus `render_game_to_text` and `advanceTime` testing hooks.
