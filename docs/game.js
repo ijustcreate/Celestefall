@@ -299,9 +299,7 @@
 
   function applyLoadout() {
     const color = game.loadout.color;
-    // Ash's costume is red-led and P2's is blue-led. Applying the roster
-    // color to body/gear preserves that distinction while making a clear team tint.
-    activePlayerRig()?.applyPalette({ head: '#ffffff', body: color, gear: color, weapon: '#ffffff' });
+    activePlayerRig()?.setTeamChroma(game.loadout.character, color);
     localStorage.setItem('bcdkc-encore-loadout', JSON.stringify(game.loadout));
   }
 
