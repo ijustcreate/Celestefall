@@ -10,6 +10,11 @@
   ctx.imageSmoothingEnabled = false;
 
   const STEP = 1 / 60;
+  // Remote players are indexed in world-space cells.  The renderer, hit tests,
+  // and capture system never need to walk every connected player each frame.
+  const REMOTE_CELL_WIDTH = 160;
+  const MAX_VISIBLE_REMOTE_SPRITES = 48;
+  const MAX_VISIBLE_REMOTE_LABELS = 10;
   // Canvas Spine rendering is substantially more expensive than the fixed-step
   // simulation.  Keep its timeline work tied to visible rendering, at a small
   // cadence, rather than advancing every rig for every catch-up physics step.
@@ -45,6 +50,7 @@
   const images = {};
   let backgroundLayer = null;
   let nextRoomPublishAt = 0;
+  const remoteSpriteCache = new Map();
 
   function makeNoteSprite(fill, stroke) {
     const surface = document.createElement('canvas');
@@ -60,6 +66,22 @@
     context.strokeText('♪', 16, 16);
     context.fillText('♪', 16, 16);
     return surface;
+  }
+
+  function remoteSprite(remote) {
+    const key = `${remote.character || 'ash'}:${remote.color || '#ffffff'}`;
+    let sprite = remoteSpriteCache.get(key);
+    if (sprite) return sprite;
+    sprite = document.createElement('canvas');
+    sprite.width = 22;
+    sprite.height = 38;
+    const target = sprite.getContext('2d');
+    target.imageSmoothingEnabled = false;
+    target.fillStyle = remote.color || '#ffffff'; target.fillRect(2, 8, 18, 28);
+    target.fillStyle = '#f5d5bd'; target.fillRect(5, 2, 12, 8);
+    target.fillStyle = remote.character === 'p2' ? '#234d9c' : '#932d43'; target.fillRect(1, 6, 20, 4);
+    remoteSpriteCache.set(key, sprite);
+    return sprite;
   }
 
   const noteSprites = {
@@ -212,12 +234,115 @@
     player: null,
     loadout: { character: 'ash', color: PLAYER_COLORS[0] },
     remotePlayers: new Map(),
+    remoteCells: new Map(),
+    remoteCaptureMembers: new Map(),
     capturedZones: new Map(),
     captureProgress: new Map(),
     respawnBursts: [],
     room: null,
     roomCount: 0
   };
+
+  for (const zone of CAPTURE_ZONES) game.remoteCaptureMembers.set(zone.id, new Map());
+
+  function remoteCell(x) {
+    return Math.floor((Number.isFinite(x) ? x : SPAWN.x) / REMOTE_CELL_WIDTH);
+  }
+
+  function removeRemoteFromIndexes(remote) {
+    if (!remote) return;
+    const bucket = game.remoteCells.get(remote.__cell);
+    if (bucket) {
+      bucket.delete(remote.id);
+      if (!bucket.size) game.remoteCells.delete(remote.__cell);
+    }
+    for (const zoneId of remote.__captureZones || []) {
+      const colors = game.remoteCaptureMembers.get(zoneId);
+      const members = colors?.get(remote.color);
+      if (!members) continue;
+      members.delete(remote.id);
+      if (!members.size) colors.delete(remote.color);
+    }
+    remote.__captureZones = [];
+  }
+
+  function addRemoteToIndexes(remote) {
+    if (!remote?.id) return;
+    remote.__cell = remoteCell(remote.x);
+    let bucket = game.remoteCells.get(remote.__cell);
+    if (!bucket) game.remoteCells.set(remote.__cell, bucket = new Set());
+    bucket.add(remote.id);
+    remote.__captureZones = [];
+    if (remote.alive === false || !remote.color) return;
+    for (const zone of CAPTURE_ZONES) {
+      if (remote.x < zone.x || remote.x > zone.x + zone.w || remote.y < zone.y || remote.y > zone.y + zone.h) continue;
+      const colors = game.remoteCaptureMembers.get(zone.id);
+      let members = colors.get(remote.color);
+      if (!members) colors.set(remote.color, members = new Map());
+      members.set(remote.id, { id: remote.id, name: remote.name || 'PLAYER' });
+      remote.__captureZones.push(zone.id);
+    }
+  }
+
+  function upsertRemote(payload) {
+    if (!payload?.id) return null;
+    const remote = game.remotePlayers.get(payload.id);
+    if (remote) {
+      removeRemoteFromIndexes(remote);
+      Object.assign(remote, payload);
+      addRemoteToIndexes(remote);
+      return remote;
+    }
+    const created = { ...payload, x: payload.x ?? SPAWN.x, y: payload.y ?? SPAWN.y, facing: payload.facing || 1, animation: payload.animation || 'idle', health: payload.health ?? 3 };
+    game.remotePlayers.set(created.id, created);
+    addRemoteToIndexes(created);
+    return created;
+  }
+
+  function removeRemote(id) {
+    const remote = game.remotePlayers.get(id);
+    if (!remote) return;
+    removeRemoteFromIndexes(remote);
+    game.remotePlayers.delete(id);
+  }
+
+  function remotePlayersInRange(minX, maxX, limit = Infinity) {
+    const players = [];
+    for (let cell = remoteCell(minX); cell <= remoteCell(maxX) && players.length < limit; cell += 1) {
+      const bucket = game.remoteCells.get(cell);
+      if (!bucket) continue;
+      for (const id of bucket) {
+        const remote = game.remotePlayers.get(id);
+        if (!remote || remote.x < minX || remote.x > maxX) continue;
+        players.push(remote);
+        if (players.length === limit) break;
+      }
+    }
+    return players;
+  }
+
+  // Deliberately opt-in local benchmark hook. It lets the mobile benchmark
+  // exercise a room-sized render/update load without exposing test controls in
+  // ordinary game sessions.
+  if (new URLSearchParams(location.search).get('perf') === '1') {
+    window.__encorePerformance.seedRemotePlayers = count => {
+      for (let index = 0; index < count; index += 1) {
+        upsertRemote({
+          id: `perf-${index}`,
+          name: `P${index + 1}`,
+          x: (index * 73) % WORLD.width,
+          y: 336 - (index % 4) * 36,
+          facing: index % 2 ? -1 : 1,
+          character: index % 2 ? 'p2' : 'ash',
+          color: PLAYER_COLORS[index % PLAYER_COLORS.length],
+          animation: 'idle',
+          health: 3,
+          alive: true
+        });
+      }
+      return { players: game.remotePlayers.size, cells: game.remoteCells.size };
+    };
+  }
   // The game can be hosted separately from the karaoke site.  Lock event
   // traffic to the direct parent that supplies the first valid session.
   let parentOrigin = null;
@@ -940,7 +1065,7 @@
       }
 
       if (note.owner === 'player' && note.life > 0) {
-        for (const remote of game.remotePlayers.values()) {
+        for (const remote of remotePlayersInRange(note.x - 24, note.x + 24)) {
           if (remote.alive !== false && remote.color !== game.loadout.color && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, { x: remote.x - 9, y: remote.y - 34, w: 18, h: 34 })) {
             note.life = 0;
             game.room?.send('hit', { targetId: remote.id, attackerId: game.room.player.id, attackerColor: game.loadout.color, x: Math.sign(note.vx || game.player.facing) * 2.8, y: -2.5 });
@@ -1031,11 +1156,15 @@
     if (player.alive && game.loadout.color === color && player.x >= zone.x && player.x <= zone.x + zone.w && player.y >= zone.y && player.y <= zone.y + zone.h) {
       members.push({ id: game.room?.player.id || 'local', name: game.playerName });
     }
-    for (const remote of game.remotePlayers.values()) {
-      if (remote.alive === false || remote.color !== color) continue;
-      if (remote.x >= zone.x && remote.x <= zone.x + zone.w && remote.y >= zone.y && remote.y <= zone.y + zone.h) members.push({ id: remote.id, name: remote.name || 'PLAYER' });
-    }
+    const remotes = game.remoteCaptureMembers.get(zone.id)?.get(color);
+    if (remotes) members.push(...remotes.values());
     return members;
+  }
+
+  function captureContributorCount(zone, color) {
+    const player = game.player;
+    const local = player.alive && game.loadout.color === color && player.x >= zone.x && player.x <= zone.x + zone.w && player.y >= zone.y && player.y <= zone.y + zone.h ? 1 : 0;
+    return local + (game.remoteCaptureMembers.get(zone.id)?.get(color)?.size || 0);
   }
 
   function updateCaptureZones() {
@@ -1046,10 +1175,11 @@
       // Player color is the team assignment. Friendly zones stay captured;
       // another color must hold the room to replace its color and roster.
       if (captured?.color === game.loadout.color) { game.captureProgress.set(zone.id, 0); continue; }
-      const contributors = captureRoster(zone, game.loadout.color);
-      const progress = contributors.length ? Math.min(CAPTURE_FRAMES, (game.captureProgress.get(zone.id) || 0) + contributors.length) : Math.max(0, (game.captureProgress.get(zone.id) || 0) - 2);
+      const contributorCount = captureContributorCount(zone, game.loadout.color);
+      const progress = contributorCount ? Math.min(CAPTURE_FRAMES, (game.captureProgress.get(zone.id) || 0) + contributorCount) : Math.max(0, (game.captureProgress.get(zone.id) || 0) - 2);
       game.captureProgress.set(zone.id, progress);
       if (progress === CAPTURE_FRAMES) {
+        const contributors = captureRoster(zone, game.loadout.color);
         const nextCapture = { id: zone.id, color: game.loadout.color, contributors, capturedAt: Date.now() };
         game.capturedZones.set(zone.id, nextCapture);
         game.room?.send('capture', nextCapture);
@@ -1078,14 +1208,12 @@
     game.room = new window.EncoreRoom({ url: config.realtimeUrl, key: config.realtimeKey, roomId: config.roomId || 'royal' }, { id, name: game.playerName, character: game.loadout.character, color: game.loadout.color });
     game.room.addEventListener('status', event => setRoomStatus(event.detail.connected ? 'LIVE ROOM' : 'OFFLINE PRACTICE', event.detail.connected));
     game.room.addEventListener('presence', event => { game.roomCount = event.detail.count; setRoomStatus(event.detail.count > 1 ? `LIVE · ${event.detail.count}/8` : 'LIVE · WAITING', true); });
-    game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); game.remotePlayers.set(member.id, { ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
-    game.room.addEventListener('leave', event => game.remotePlayers.delete(event.detail?.id));
+    game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); upsertRemote({ ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
+    game.room.addEventListener('leave', event => removeRemote(event.detail?.id));
     game.room.addEventListener('state', event => {
       const remote = event.detail;
       if (!remote?.id || remote.id === game.room.player.id) return;
-      const current = game.remotePlayers.get(remote.id);
-      if (current) Object.assign(current, remote);
-      else game.remotePlayers.set(remote.id, { ...remote });
+      upsertRemote(remote);
     });
     game.room.addEventListener('hit', event => {
       const hit = event.detail;
@@ -1482,15 +1610,13 @@
   }
 
   function drawRemotePlayers() {
-    for (const remote of game.remotePlayers.values()) {
+    const remotes = remotePlayersInRange(game.camera.x - 30, game.camera.x + canvas.width + 30, MAX_VISIBLE_REMOTE_SPRITES);
+    let labelled = 0;
+    for (const remote of remotes) {
       const x = Math.round(remote.x - game.camera.x), y = Math.round(remote.y);
-      if (x < -30 || x > canvas.width + 30) continue;
-      ctx.save();
-      ctx.translate(x, y); ctx.scale(remote.facing || 1, 1);
-      ctx.fillStyle = remote.color || '#ffffff'; ctx.fillRect(-9, -28, 18, 28);
-      ctx.fillStyle = '#f5d5bd'; ctx.fillRect(-6, -34, 12, 8);
-      ctx.fillStyle = remote.character === 'p2' ? '#234d9c' : '#932d43'; ctx.fillRect(-10, -30, 20, 4);
-      ctx.restore();
+      ctx.drawImage(remoteSprite(remote), x - 11, y - 36);
+      if (labelled >= MAX_VISIBLE_REMOTE_LABELS) continue;
+      labelled += 1;
       ctx.fillStyle = '#fff1c2'; ctx.font = 'bold 8px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText(remote.name || 'PLAYER', x, y - 47);
     }
   }
