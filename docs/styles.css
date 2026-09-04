@@ -80,6 +80,17 @@ button { font: inherit; }
 
 .hud-actions { display: flex; gap: 8px; pointer-events: auto; }
 .is-embedded .hud-actions { margin-right: 58px; }
+.room-status { align-self:center; border:1px solid rgba(244,236,215,.65); border-radius:999px; padding:6px 8px; background:rgba(54,53,66,.78); color:#ead7a8; font-size:8px; font-weight:900; letter-spacing:.1em; }
+.room-status.is-online { color:#a8e9b7; border-color:#6fbd8e; }
+
+.character-select { position:absolute; z-index:4; left:12px; bottom:12px; display:flex; gap:8px; align-items:end; pointer-events:auto; color:#f4ecd7; text-shadow:0 2px #2c2938; }
+.fighter-choice,.color-choice { display:flex; align-items:center; gap:4px; padding:5px 6px; border:1px solid rgba(244,236,215,.52); border-radius:5px; background:rgba(28,23,37,.8); }
+.fighter-choice>span,.color-choice>span { color:#ead7a8; font-size:7px; font-weight:900; letter-spacing:.12em; }
+.fighter-choice button { border:1px solid #6e617a; border-radius:3px; padding:4px 6px; color:#f4ecd7; background:#30283e; font-size:8px; font-weight:900; }
+.fighter-choice button.is-selected { color:#211729; border-color:#f2d17b; background:#f2d17b; }
+#colorOptions { display:flex; gap:3px; }
+#colorOptions button { width:14px; height:14px; padding:0; border:2px solid #352d40; border-radius:50%; background:var(--player-color); }
+#colorOptions button.is-selected { border-color:#fff4cf; box-shadow:0 0 0 1px #f2d17b; }
 
 .icon-button {
   width: 42px;

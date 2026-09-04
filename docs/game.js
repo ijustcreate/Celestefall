@@ -45,11 +45,13 @@
     assetName: 'Player2',
     basePath: 'assets/player2'
   }) : null;
-  const pixelRenderer = window.PixelCharacterRenderer ? new window.PixelCharacterRenderer(ctx) : null;
-  const skinEditor = window.PixelCharacterStudio && pixelRenderer ? new window.PixelCharacterStudio({
-    renderer: pixelRenderer,
-    legacyRigs: { ash, p2: playerTwoRig }
-  }) : null;
+  // Custom character construction is intentionally paused. Everyone picks an
+  // authored Ash or P2 rig, with a single roster color applied to its red/blue
+  // signature material.
+  const skinEditor = null;
+  const PLAYER_COLORS = Object.freeze([
+    '#e85d5d', '#4fa3ff', '#65cf84', '#f2c14e', '#b77bff', '#ef75b5', '#f28a4b', '#4ed1c5'
+  ]);
   const BAT_ANIMATIONS = {
     idle: { name: 'idle', loop: true },
     run: { name: 'fly', loop: true },
@@ -65,8 +67,8 @@
     death: { name: 'death', loop: false }
   };
   const CREATURE_SPECS = [
-    { id: 'slug-west', type: 'slug', spawnX: 420, spawnY: 328, patrolMin: 392, patrolMax: 492, health: 2, width: 34, height: 22 },
-    { id: 'slug-east', type: 'slug', spawnX: 1380, spawnY: 328, patrolMin: 1308, patrolMax: 1430, health: 2, width: 34, height: 22 },
+    { id: 'slug-west', type: 'slug', spawnX: 420, spawnY: 336, patrolMin: 392, patrolMax: 492, health: 2, width: 34, height: 22 },
+    { id: 'slug-east', type: 'slug', spawnX: 1380, spawnY: 336, patrolMin: 1308, patrolMax: 1430, health: 2, width: 34, height: 22 },
     { id: 'bat-west', type: 'bat', spawnX: 520, spawnY: 210, patrolMin: 430, patrolMax: 610, health: 1, width: 32, height: 25 },
     { id: 'bat-east', type: 'bat', spawnX: 1080, spawnY: 190, patrolMin: 990, patrolMax: 1170, health: 1, width: 32, height: 25 }
   ];
@@ -139,6 +141,11 @@
     jumpHeld: false
   };
 
+  const CAPTURE_ZONES = [
+    { id: 'backstage', x: 300, y: 168, w: 74, h: 62, label: 'BACKSTAGE' },
+    { id: 'opera', x: 924, y: 132, w: 74, h: 62, label: 'OPERA' },
+    { id: 'crystal', x: 1610, y: 168, w: 74, h: 62, label: 'CRYSTAL' }
+  ];
   const game = {
     mode: 'playing',
     time: 0,
@@ -154,11 +161,17 @@
     movers: makeMovers(),
     bot: null,
     creatures: [],
-    player: null
+    player: null,
+    loadout: { character: 'ash', color: PLAYER_COLORS[0] },
+    remotePlayers: new Map(),
+    capturedZones: new Map(),
+    captureProgress: new Map(),
+    room: null,
+    roomCount: 0
   };
 
   const localAdminPreview = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('admin') === '1';
-  skinEditor?.setAdmin(localAdminPreview);
+  void localAdminPreview;
 
   function freshPlayer() {
     return {
@@ -193,6 +206,9 @@
       dashVX: 0,
       dashVY: 0,
       hitTimer: 0,
+      health: 3,
+      maxHealth: 3,
+      invulnerable: 0,
       animation: 'idle',
       animationTime: 0,
       squash: 1,
@@ -272,6 +288,49 @@
     input.meleePressed = false;
     input.dashPressed = false;
     vibrate(countDeath ? 30 : 12);
+  }
+
+  function activePlayerRig() {
+    return game.loadout.character === 'p2' ? playerTwoRig : ash;
+  }
+
+  function applyLoadout() {
+    const color = game.loadout.color;
+    // Ash's costume is red-led and P2's is blue-led. Applying the roster
+    // color to body/gear preserves that distinction while making a clear team tint.
+    activePlayerRig()?.applyPalette({ head: '#ffffff', body: color, gear: color, weapon: '#ffffff' });
+    localStorage.setItem('bcdkc-encore-loadout', JSON.stringify(game.loadout));
+  }
+
+  function emitGameEvent(event, payload = {}) {
+    if (window.parent !== window) window.parent.postMessage({ type: 'bcd:encore:event', event, payload }, location.origin);
+  }
+
+  function setRoomStatus(text, online = false) {
+    const node = document.getElementById('roomStatus');
+    if (node) { node.textContent = text; node.classList.toggle('is-online', online); }
+  }
+
+  function setLoadout(character, color) {
+    game.loadout.character = character === 'p2' ? 'p2' : 'ash';
+    game.loadout.color = PLAYER_COLORS.includes(color) ? color : game.loadout.color;
+    document.querySelectorAll('[data-character]').forEach(button => button.classList.toggle('is-selected', button.dataset.character === game.loadout.character));
+    document.querySelectorAll('[data-color]').forEach(button => button.classList.toggle('is-selected', button.dataset.color === game.loadout.color));
+    applyLoadout();
+    if (game.room) { game.room.player.character = game.loadout.character; game.room.player.color = game.loadout.color; game.room.track(); }
+  }
+
+  function setupLoadoutControls() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('bcdkc-encore-loadout') || 'null');
+      if (saved?.character === 'p2' || saved?.character === 'ash') game.loadout.character = saved.character;
+      if (PLAYER_COLORS.includes(saved?.color)) game.loadout.color = saved.color;
+    } catch (_) {}
+    const colors = document.getElementById('colorOptions');
+    if (colors) colors.innerHTML = PLAYER_COLORS.map(color => `<button type="button" data-color="${color}" aria-label="Select ${color}" style="--player-color:${color}"></button>`).join('');
+    document.querySelectorAll('[data-character]').forEach(button => button.addEventListener('click', () => setLoadout(button.dataset.character, game.loadout.color)));
+    document.querySelectorAll('[data-color]').forEach(button => button.addEventListener('click', () => setLoadout(game.loadout.character, button.dataset.color)));
+    setLoadout(game.loadout.character, game.loadout.color);
   }
 
   function rectAt(x = game.player.x, y = game.player.y, height = game.player.crouching ? PLAYER_CROUCH_H : PLAYER_H) {
@@ -475,11 +534,21 @@
 
   function hitPlayer(knockbackX, knockbackY) {
     const player = game.player;
+    if (player.invulnerable > 0) return false;
+    player.health -= 1;
+    player.invulnerable = 45;
     player.vx = knockbackX;
     player.vy = knockbackY;
     player.hitTimer = 14;
     emitDust(player.x, player.y - 17, 8);
     vibrate([16, 24, 16]);
+    if (player.health <= 0) {
+      game.deaths += 1;
+      game.player = freshPlayer();
+      game.player.invulnerable = 90;
+      game.room?.send('eliminated', { victimId: game.room.player.id, killerId: game.lastAttacker || null });
+    }
+    return true;
   }
 
   function creatureRect(creature) {
@@ -783,6 +852,13 @@
       }
 
       if (note.owner === 'player' && note.life > 0) {
+        for (const remote of game.remotePlayers.values()) {
+          if (remote.alive !== false && overlap({ x: note.x - 4, y: note.y - 4, w: 8, h: 8 }, { x: remote.x - 9, y: remote.y - 34, w: 18, h: 34 })) {
+            note.life = 0;
+            game.room?.send('hit', { targetId: remote.id, attackerId: game.room.player.id, x: Math.sign(note.vx || game.player.facing) * 2.8, y: -2.5 });
+            break;
+          }
+        }
         const creature = game.creatures.find(enemy => enemy.alive && overlap(
           { x: note.x - 4, y: note.y - 4, w: 8, h: 8 },
           creatureRect(enemy)
@@ -855,6 +931,42 @@
       else damageCreature(target.actor, 1, knockbackX, 2.3);
       emitDust(p.x, p.y, 7);
     }
+  }
+
+  function updateCaptureZones() {
+    const player = game.player;
+    for (const zone of CAPTURE_ZONES) {
+      if (game.capturedZones.has(zone.id)) continue;
+      const inside = player.x >= zone.x && player.x <= zone.x + zone.w && player.y >= zone.y && player.y <= zone.y + zone.h;
+      const progress = inside ? Math.min(180, (game.captureProgress.get(zone.id) || 0) + 1) : Math.max(0, (game.captureProgress.get(zone.id) || 0) - 2);
+      game.captureProgress.set(zone.id, progress);
+      if (progress === 180) {
+        const captured = { id: zone.id, ownerId: game.room?.player.id || 'local', owner: game.playerName, color: game.loadout.color };
+        game.capturedZones.set(zone.id, captured);
+        game.room?.send('capture', captured);
+        emitGameEvent('capture_point', { zone: zone.id });
+      }
+    }
+  }
+
+  function publishRoomState() {
+    const p = game.player;
+    game.room?.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: true });
+  }
+
+  function connectRoom(config) {
+    if (!window.EncoreRoom || game.room) return;
+    const id = String(config.playerId || `guest-${crypto.randomUUID?.() || Date.now()}`);
+    game.room = new window.EncoreRoom({ url: config.realtimeUrl, key: config.realtimeKey, roomId: config.roomId || 'royal' }, { id, name: game.playerName, character: game.loadout.character, color: game.loadout.color });
+    game.room.addEventListener('status', event => setRoomStatus(event.detail.connected ? 'LIVE ROOM' : 'OFFLINE PRACTICE', event.detail.connected));
+    game.room.addEventListener('presence', event => { game.roomCount = event.detail.count; setRoomStatus(event.detail.count > 1 ? `LIVE · ${event.detail.count}/8` : 'LIVE · WAITING', true); });
+    game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); game.remotePlayers.set(member.id, { ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
+    game.room.addEventListener('state', event => { const remote = event.detail; if (!remote?.id || remote.id === game.room.player.id) return; game.remotePlayers.set(remote.id, { ...(game.remotePlayers.get(remote.id) || {}), ...remote }); });
+    game.room.addEventListener('hit', event => { const hit = event.detail; if (hit?.targetId === game.room.player.id) { game.lastAttacker = hit.attackerId; hitPlayer(hit.x || 0, hit.y || -2); } });
+    game.room.addEventListener('eliminated', event => { const result = event.detail; if (result?.killerId === game.room.player.id) { game.kills += 1; emitGameEvent('first_pk', { victimId: result.victimId }); } });
+    game.room.addEventListener('capture', event => { const captured = event.detail; if (captured?.id) game.capturedZones.set(captured.id, captured); });
+    game.room.addEventListener('full', () => { game.room.leave(); setRoomStatus('ROOM FULL · 8/8'); });
+    game.room.connect();
   }
 
   function update() {
@@ -1027,13 +1139,16 @@
     else if (p.lookingUp) p.animation = 'look';
     else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
-    skinEditor?.activeRig?.()?.update(STEP, p.animation);
+    p.invulnerable = Math.max(0, p.invulnerable - 1);
+    activePlayerRig()?.update(STEP, p.animation);
 
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
     updateBot();
     updateCreatures();
     updateProjectiles();
+    updateCaptureZones();
+    publishRoomState();
     updateCamera();
     input.jumpPressed = false;
     input.shootReleased = false;
@@ -1148,6 +1263,36 @@
     game.movers.forEach(drawThinPlatform);
   }
 
+  function drawCaptureZones() {
+    for (const zone of CAPTURE_ZONES) {
+      const x = Math.round(zone.x - game.camera.x), progress = (game.captureProgress.get(zone.id) || 0) / 180, captured = game.capturedZones.get(zone.id);
+      ctx.fillStyle = captured?.color || 'rgba(240,194,88,.2)';
+      ctx.globalAlpha = captured ? .24 : .12 + progress * .18;
+      ctx.fillRect(x, zone.y, zone.w, zone.h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = captured?.color || '#e5bb58';
+      ctx.setLineDash(captured ? [] : [3, 3]);
+      ctx.strokeRect(x + .5, zone.y + .5, zone.w - 1, zone.h - 1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ffe8a6'; ctx.font = 'bold 7px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillText(captured ? `${zone.label} ✓` : `${zone.label} ${Math.round(progress * 100)}%`, x + zone.w / 2, zone.y + 11);
+    }
+  }
+
+  function drawRemotePlayers() {
+    for (const remote of game.remotePlayers.values()) {
+      const x = Math.round(remote.x - game.camera.x), y = Math.round(remote.y);
+      if (x < -30 || x > canvas.width + 30) continue;
+      ctx.save();
+      ctx.translate(x, y); ctx.scale(remote.facing || 1, 1);
+      ctx.fillStyle = remote.color || '#ffffff'; ctx.fillRect(-9, -28, 18, 28);
+      ctx.fillStyle = '#f5d5bd'; ctx.fillRect(-6, -34, 12, 8);
+      ctx.fillStyle = remote.character === 'p2' ? '#234d9c' : '#932d43'; ctx.fillRect(-10, -30, 20, 4);
+      ctx.restore();
+      ctx.fillStyle = '#fff1c2'; ctx.font = 'bold 8px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText(remote.name || 'PLAYER', x, y - 47);
+    }
+  }
+
   function playerFrame() {
     const p = game.player;
     if (p.animation === 'run') return images[`run${Math.floor(p.animationTime * 8.5) % 6}`];
@@ -1160,32 +1305,24 @@
     const p = game.player;
     const x = Math.round((p.x - game.camera.x) * 2) / 2;
     const y = Math.round(p.y - game.camera.y);
-    const selectedCharacter = skinEditor?.activeCharacter?.();
-    if (selectedCharacter?.kind === 'pixel' && pixelRenderer) {
-      pixelRenderer.draw(selectedCharacter, x, y, p.facing, p.animation, p.animationTime, 1.5, p.stretch, p.squash);
-      return;
-    }
-    const selectedRig = skinEditor?.activeRig?.() || ash;
+    const selectedRig = activePlayerRig();
     if (selectedRig?.ready) {
       selectedRig.draw(x, y, p.facing, p.stretch, p.squash);
-      return;
+    } else {
+      const image = playerFrame();
+      if (image) {
+        ctx.save(); ctx.translate(x, y);
+        if (p.animation === 'crouch') ctx.scale(p.facing * p.stretch * 1.12, p.squash * .7);
+        else if (p.animation === 'look') ctx.scale(p.facing * p.stretch * .96, p.squash * 1.04);
+        else ctx.scale(p.facing * p.stretch, p.squash);
+        ctx.drawImage(image, -image.width / 2, -image.height); ctx.restore();
+      }
     }
-
-    const image = playerFrame();
-    if (!image) return;
-    ctx.save();
-    ctx.translate(x, y);
-    if (p.animation === 'crouch') ctx.scale(p.facing * p.stretch * 1.12, p.squash * .7);
-    else if (p.animation === 'look') ctx.scale(p.facing * p.stretch * .96, p.squash * 1.04);
-    else ctx.scale(p.facing * p.stretch, p.squash);
-    ctx.drawImage(image, -image.width / 2, -image.height);
-    ctx.restore();
-
-    if (p.animation === 'look') {
-      ctx.fillStyle = '#f4ecd7';
-      ctx.fillRect(Math.round(x - 1), Math.round(y - image.height - 7), 2, 4);
-      ctx.fillRect(Math.round(x - 3), Math.round(y - image.height - 5), 2, 2);
-      ctx.fillRect(Math.round(x + 1), Math.round(y - image.height - 5), 2, 2);
+    ctx.fillStyle = '#363542';
+    ctx.fillRect(x - 13, y - 43, 26, 7);
+    for (let index = 0; index < p.maxHealth; index += 1) {
+      ctx.fillStyle = index < p.health ? game.loadout.color : '#5d586c';
+      ctx.fillRect(x - 10 + index * 8, y - 41, 6, 3);
     }
   }
 
@@ -1221,7 +1358,7 @@
       const y = Math.round(creature.y - game.camera.y);
       if (x < -70 || x > canvas.width + 70) continue;
       const rig = creatureRigs.get(creature.id);
-      if (rig?.ready) rig.draw(x, y, creature.facing, 1, 1);
+      if (rig?.ready) rig.draw(x, y, creature.type === 'bat' ? -creature.facing : creature.facing, 1, 1);
       else if (creature.type === 'bat') {
         ctx.fillStyle = '#53355f';
         ctx.beginPath();
@@ -1313,10 +1450,12 @@
     ctx.imageSmoothingEnabled = false;
     drawBackdrop();
     drawPlatforms();
+    drawCaptureZones();
     drawParticles();
     drawProjectiles();
     drawCreatures();
     drawBot();
+    drawRemotePlayers();
     drawPlayer();
     drawAimGuide();
   }
@@ -1491,10 +1630,6 @@
     help.classList.toggle('is-hidden');
   });
 
-  window.addEventListener('ash-skin-editor:close', () => {
-    canvas.focus({ preventScroll: true });
-  });
-
   let helpTimer = 0;
   function hideHelpSoon() {
     clearTimeout(helpTimer);
@@ -1506,7 +1641,7 @@
     if (event.data?.type === 'bcd:encore:init') {
       if (!trustedParent) return;
       game.playerName = event.data.payload?.playerName || 'Climber';
-      skinEditor?.setAdmin(event.data.payload?.isAdmin === true);
+      connectRoom(event.data.payload || {});
     }
     // Closing the host overlay never pauses or rewinds this always-live simulation.
   });
@@ -1528,9 +1663,10 @@
       lookingUp: game.player.lookingUp,
       facing: game.player.facing,
       animation: game.player.animation,
-      character: skinEditor?.activeCharacter?.()?.name || (ash?.ready ? 'Ash' : 'Fallback'),
-      characterKind: skinEditor?.activeCharacter?.()?.kind || 'legacy',
-      rigAnimation: skinEditor?.activeRig?.()?.currentAnimation || null,
+      character: game.loadout.character === 'p2' ? 'P2' : 'Ash',
+      color: game.loadout.color,
+      health: game.player.health,
+      rigAnimation: activePlayerRig()?.currentAnimation || null,
       shooting: game.player.shootTimer > 0,
       aiming: game.player.aiming,
       aim: { x: Number(game.player.aimX.toFixed(2)), y: Number(game.player.aimY.toFixed(2)) },
@@ -1571,7 +1707,8 @@
     deaths: game.deaths,
     botKnockouts: game.kills,
     creatureKnockouts: game.creatureKills,
-    skinEditor: skinEditor?.state?.() || null
+    room: { players: game.roomCount, connected: Boolean(game.room?.connected), remotes: [...game.remotePlayers.values()].map(player => ({ id:player.id, name:player.name, x:Math.round(player.x), y:Math.round(player.y) })) },
+    captureZones: CAPTURE_ZONES.map(zone => ({ id:zone.id, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), capturedBy:game.capturedZones.get(zone.id)?.owner || null }))
   });
 
   // Local-only deterministic combat hooks keep production closed while the
@@ -1613,6 +1750,7 @@
   async function boot() {
     // Start physics and controls immediately. The high-resolution Spine rigs
     // can finish streaming without leaving the canvas or input loop inert.
+    setupLoadoutControls();
     resetGame();
     render();
     requestAnimationFrame(frame);
@@ -1643,8 +1781,7 @@
       });
     });
     await Promise.all([fallbackImages, ashRig, selectableBlueRig, blueRig, ...creatureLoads]);
-    skinEditor?.hydrateMainRig();
-    skinEditor?.activeRig?.()?.update(0, game.player.animation);
+    activePlayerRig()?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
     game.creatures.forEach(creature => creatureRigs.get(creature.id)?.update(0, creature.animation));
     render();

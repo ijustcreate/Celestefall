@@ -4,32 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#363542">
-  <title>BCD Encore Royale</title>
+  <title>BCDKC Encore Royal</title>
   <link rel="icon" href="assets/ash/Ash.png">
   <link rel="stylesheet" href="styles.css?v=20260901-encore-brand">
 </head>
 <body>
-  <main class="game-shell" aria-label="BCD Encore Royale game">
+  <main class="game-shell" aria-label="BCDKC Encore Royal game">
     <section class="stage-wrap">
-      <canvas id="game" width="640" height="360" aria-label="BCD Encore Royale battle arena" tabindex="0"></canvas>
+      <canvas id="game" width="640" height="360" aria-label="BCDKC Encore Royal battle arena" tabindex="0"></canvas>
       <div class="hud">
-        <div class="brand"><div class="brand-title"><span>BCD</span> <span>ENCORE ROYALE</span></div><small>LIVE BATTLE</small></div>
-        <div class="hud-actions">
-          <button id="skinEditorButton" class="icon-button skin-editor-button" type="button" aria-label="Open character studio" title="Character Studio">✦</button>
-          <button id="helpButton" class="icon-button" type="button" aria-label="Show controls">?</button>
-        </div>
+        <div class="brand"><div class="brand-title"><span>BCDKC</span> <span>ENCORE ROYAL</span></div><small>LIVE BATTLE</small></div>
+        <div class="hud-actions"><span id="roomStatus" class="room-status" aria-live="polite">CONNECTING</span><button id="helpButton" class="icon-button" type="button" aria-label="Show controls">?</button></div>
       </div>
       <section id="help" class="help-card" aria-live="polite">
         <strong>HOW TO PLAY</strong>
         <span>Stick / WASD: move and aim · A / Space: jump or wall-jump · B: dash</span>
         <span>Hold ♪ / Shift to aim, then release to shoot · ⚔: sword · hold ↑ or ↓ with ⚔ for a vertical slash · push into a wall in midair to cling</span>
       </section>
-      <nav id="characterCarousel" class="character-carousel" aria-label="Choose character">
-        <button type="button" data-character-prev aria-label="Previous character">‹</button>
-        <button class="character-current" type="button" data-character-open aria-label="Edit selected character">
-          <small>FIGHTER</small><strong data-character-name>ASH</strong>
-        </button>
-        <button type="button" data-character-next aria-label="Next character">›</button>
+      <nav id="characterSelect" class="character-select" aria-label="Choose your fighter and color">
+        <div class="fighter-choice"><span>FIGHTER</span><button type="button" data-character="ash" class="is-selected">ASH</button><button type="button" data-character="p2">P2</button></div>
+        <div class="color-choice"><span>COLOR</span><div id="colorOptions" role="group" aria-label="Choose player color"></div></div>
       </nav>
     </section>
 
@@ -118,8 +112,9 @@
     </section>
   </main>
   <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="ash-character.js?v=20260901-encore-brand"></script>
-  <script src="skin-editor.js?v=20260901-encore-brand"></script>
-  <script src="game.js?v=20260901-encore-brand"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="ash-character.js?v=20260903-royal-room"></script>
+  <script src="room-client.js?v=20260903-royal-room"></script>
+  <script src="game.js?v=20260903-royal-room"></script>
 </body>
 </html>
