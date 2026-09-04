@@ -10,6 +10,11 @@
   ctx.imageSmoothingEnabled = false;
 
   const STEP = 1 / 60;
+  // Canvas Spine rendering is substantially more expensive than the fixed-step
+  // simulation.  Keep its timeline work tied to visible rendering, at a small
+  // cadence, rather than advancing every rig for every catch-up physics step.
+  const RIG_UPDATE_INTERVAL = 1 / 20;
+  const rigRenderState = new WeakMap();
   // One display tall and exactly three landscape camera widths wide.
   const WORLD = { width: 1920, height: 360 };
   const VIEW = { width: 640, height: 360 };
@@ -79,6 +84,22 @@
       assetName: 'Slugger setup', basePath: 'assets/slug', scale: .14, skin: 'Slug', animations: SLUG_ANIMATIONS
     }) : null
   ]));
+
+  function prepareRigForRender(rig, animation) {
+    if (!rig?.ready) return;
+    const now = performance.now();
+    const previous = rigRenderState.get(rig);
+    if (!previous || previous.animation !== animation) {
+      rig.update(0, animation);
+      rigRenderState.set(rig, { animation, lastUpdate: now });
+      return;
+    }
+    const elapsed = (now - previous.lastUpdate) / 1000;
+    if (elapsed >= RIG_UPDATE_INTERVAL) {
+      rig.update(Math.min(elapsed, .1), animation);
+      previous.lastUpdate = now;
+    }
+  }
 
   const fixed = [
     { x: 0, y: 0, w: 20, h: 360, kind: 'solid' },
@@ -582,7 +603,6 @@
     const spec = CREATURE_SPECS.find(candidate => candidate.id === creature.id);
     if (!spec) return;
     Object.assign(creature, freshCreature(spec));
-    creatureRigs.get(creature.id)?.update(0, 'idle');
   }
 
   function startCreatureAttack(creature, duration) {
@@ -615,11 +635,9 @@
   }
 
   function updateCreature(creature) {
-    const rig = creatureRigs.get(creature.id);
     if (!creature.alive) {
       creature.respawnTimer -= 1;
       creature.animation = 'death';
-      rig?.update(STEP, creature.animation);
       if (creature.respawnTimer <= 0) respawnCreature(creature);
       return;
     }
@@ -693,7 +711,6 @@
     else if (creature.attackTimer > 0) creature.animation = 'attack';
     else if (Math.abs(creature.vx) > .12 || creature.type === 'bat') creature.animation = 'run';
     else creature.animation = 'idle';
-    rig?.update(STEP, creature.animation);
   }
 
   function updateCreatures() {
@@ -737,7 +754,6 @@
     if (!bot.alive) {
       bot.respawnTimer -= 1;
       bot.animation = 'death';
-      botRig?.update(STEP, bot.animation);
       if (bot.respawnTimer <= 0) respawnBot();
       return;
     }
@@ -835,7 +851,6 @@
     else if (!bot.grounded) bot.animation = bot.vy < 0 ? 'jump' : 'fall';
     else if (Math.abs(bot.vx) > .18) bot.animation = 'run';
     else bot.animation = 'idle';
-    botRig?.update(STEP, bot.animation);
   }
 
   function updateProjectiles() {
@@ -1142,8 +1157,6 @@
     else if (Math.abs(p.vx) > .2) p.animation = 'run';
     else p.animation = 'idle';
     p.invulnerable = Math.max(0, p.invulnerable - 1);
-    activePlayerRig()?.update(STEP, p.animation);
-
     if (p.y > WORLD.height + 40) resetGame(true);
     updateParticles();
     updateBot();
@@ -1309,6 +1322,7 @@
     const y = Math.round(p.y - game.camera.y);
     const selectedRig = activePlayerRig();
     if (selectedRig?.ready) {
+      prepareRigForRender(selectedRig, p.animation);
       selectedRig.draw(x, y, p.facing, p.stretch, p.squash);
     } else {
       const image = playerFrame();
@@ -1335,7 +1349,10 @@
     const y = Math.round(bot.y - game.camera.y);
     if (x < -60 || x > canvas.width + 60) return;
 
-    if (botRig?.ready) botRig.draw(x, y, bot.facing, 1, 1);
+    if (botRig?.ready) {
+      prepareRigForRender(botRig, bot.animation);
+      botRig.draw(x, y, bot.facing, 1, 1);
+    }
     else {
       ctx.fillStyle = '#2267c9';
       ctx.fillRect(x - 9, y - 27, 18, 27);
@@ -1359,9 +1376,11 @@
       const x = Math.round((creature.x - game.camera.x) * 2) / 2;
       const y = Math.round(creature.y - game.camera.y);
       if (x < -70 || x > canvas.width + 70) continue;
-      const rig = creatureRigs.get(creature.id);
-      if (rig?.ready) rig.draw(x, y, creature.type === 'bat' ? -creature.facing : creature.facing, 1, 1);
-      else if (creature.type === 'bat') {
+      // The player and rival are the close-up combatants. Creature rigs are
+      // much denser Spine meshes, and drawing several of them alongside both
+      // fighters can collapse an embedded canvas to single-digit FPS. Their
+      // lightweight in-engine silhouettes keep all creature gameplay visible.
+      if (creature.type === 'bat') {
         ctx.fillStyle = '#53355f';
         ctx.beginPath();
         ctx.moveTo(x, y - 10);
@@ -1742,9 +1761,12 @@
     if (!frame.last) frame.last = now;
     frame.accumulator = Math.min(.1, (frame.accumulator || 0) + (now - frame.last) / 1000);
     frame.last = now;
-    while (frame.accumulator >= STEP) {
+    if (frame.accumulator >= STEP) {
       update();
-      frame.accumulator -= STEP;
+      // Rendering must recover promptly on slower embedded devices. Dropping
+      // stale simulation time prevents a slow Spine frame from spawning up to
+      // six more expensive update passes before the next paint.
+      frame.accumulator = 0;
     }
     render();
     requestAnimationFrame(frame);
@@ -1776,13 +1798,9 @@
       botRig.failed = true;
       console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
     });
-    const creatureLoads = CREATURE_SPECS.map(spec => {
-      const rig = creatureRigs.get(spec.id);
-      return rig?.load().catch(error => {
-        rig.failed = true;
-        console.error(`${spec.type} rig failed to load; using the programmatic fallback.`, error);
-      });
-    });
+    // Creature behavior uses the lightweight silhouettes rendered above. Do
+    // not decode four unused high-resolution Spine atlases during startup.
+    const creatureLoads = [];
     await Promise.all([fallbackImages, ashRig, selectableBlueRig, blueRig, ...creatureLoads]);
     activePlayerRig()?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
