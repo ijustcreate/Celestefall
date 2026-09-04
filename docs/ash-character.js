@@ -26,6 +26,50 @@
   });
 
   const DRAWN_SWORD_STATES = new Set(['melee', 'meleeUp', 'meleeDown']);
+  // Spine keeps mutable attachment regions on SkeletonData, so each character
+  // must still build its own atlas and SkeletonData. The JSON, atlas text, and
+  // decoded source bitmap are immutable, though. Sharing those avoids decoding
+  // Player2.png three times for the selectable player and the two bot rigs.
+  const sourceAssetCache = new Map();
+
+  function loadImage(source) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = async () => {
+        try {
+          // decode() makes the startup benchmark include decode cost instead
+          // of moving it into an arbitrary later render frame.
+          await image.decode?.();
+          resolve(image);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      image.onerror = () => reject(new Error(`Could not load ${source}`));
+      image.src = source;
+    });
+  }
+
+  function loadSourceAssets(basePath, assetName) {
+    const key = `${basePath}/${assetName}`;
+    if (!sourceAssetCache.has(key)) {
+      const jsonPath = `${key}.json`;
+      const atlasPath = `${key}.atlas`;
+      const texturePath = `${key}.png`;
+      sourceAssetCache.set(key, Promise.all([
+        fetch(jsonPath).then(response => {
+          if (!response.ok) throw new Error(`Could not load ${jsonPath}: ${response.status}`);
+          return response.text();
+        }),
+        fetch(atlasPath).then(response => {
+          if (!response.ok) throw new Error(`Could not load ${atlasPath}: ${response.status}`);
+          return response.text();
+        }),
+        loadImage(texturePath)
+      ]).then(([jsonText, atlasText, image]) => ({ jsonText, atlasText, image, texturePath })));
+    }
+    return sourceAssetCache.get(key);
+  }
 
   function normalizeHex(value) {
     const candidate = String(value || '').trim();
@@ -118,36 +162,19 @@
     async load() {
       if (!window.spine?.canvas) throw new Error('The Spine canvas runtime did not load.');
 
-      const manager = new spine.canvas.AssetManager();
-      const jsonPath = `${this.basePath}/${this.assetName}.json`;
-      const atlasPath = `${this.basePath}/${this.assetName}.atlas`;
-      const texturePath = `${this.basePath}/${this.assetName}.png`;
-      manager.loadText(jsonPath);
-      manager.loadText(atlasPath);
-      manager.loadTexture(texturePath);
-
-      await new Promise((resolve, reject) => {
-        const check = () => {
-          if (manager.hasErrors()) {
-            reject(new Error(Array.from(manager.getErrors().values()).join('; ')));
-            return;
-          }
-          if (manager.isLoadingComplete()) {
-            resolve();
-            return;
-          }
-          requestAnimationFrame(check);
-        };
-        check();
+      const assets = await loadSourceAssets(this.basePath, this.assetName);
+      // Give every atlas its own lightweight CanvasTexture wrapper, but retain
+      // the one decoded HTMLImageElement from the shared source cache.
+      const atlas = new spine.TextureAtlas(assets.atlasText, path => {
+        if (`${this.basePath}/${path}` !== assets.texturePath) throw new Error(`Unexpected atlas page: ${path}`);
+        return new spine.canvas.CanvasTexture(assets.image);
       });
-
-      const atlas = new spine.TextureAtlas(manager.get(atlasPath), path => manager.get(`${this.basePath}/${path}`));
       const parser = new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas));
       // Ash was authored at a much larger resolution than this 640×360 arena.
       // Scaling during JSON parsing keeps her physics-sized and preserves the
       // full-resolution artwork without shrinking the entire game canvas.
       parser.scale = this.scale;
-      const data = parser.readSkeletonData(manager.get(jsonPath));
+      const data = parser.readSkeletonData(assets.jsonText);
       this.skeleton = new spine.Skeleton(data);
       this.skeleton.setSkinByName(this.skin);
       this.skeleton.setSlotsToSetupPose();
@@ -345,6 +372,7 @@
   }
 
   window.BulletAgeCharacter = BulletAgeCharacter;
+  window.BulletAgeCharacter.getAssetCacheStats = () => ({ entries: sourceAssetCache.size });
   window.ASH_DEFAULT_PALETTE = DEFAULT_PALETTE;
   window.AshCharacter = class AshCharacter extends BulletAgeCharacter {
     constructor(context) {
