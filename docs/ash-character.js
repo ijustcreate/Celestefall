@@ -123,6 +123,14 @@
     return /head|torso|arm|leg|pelvis|pack/i.test(name);
   }
 
+  function chromaRole(slotName, attachmentName) {
+    // Hoods are usually authored in a head slot, but they are outfit fabric.
+    // Give them the body material rules so the full hood follows the jacket
+    // color while skin and hair in ordinary head attachments stay protected.
+    if (/hood|cowl|headwear/i.test(`${slotName} ${attachmentName}`)) return 'body';
+    return /head/i.test(slotName) ? 'head' : 'body';
+  }
+
   function slotGroup(name) {
     // Keep face, skin, hair, and eyes natural. Only the authored clothing
     // material is replaced, which gives a proper chroma-key team color rather
@@ -251,10 +259,10 @@
         for (let slotIndex = 0; slotIndex < skin.attachments.length; slotIndex += 1) {
           const slotName = data.slots[slotIndex]?.name || '';
           if (!costumeSlot(slotName)) continue;
-          for (const attachment of Object.values(skin.attachments[slotIndex] || {})) {
+          for (const [attachmentName, attachment] of Object.entries(skin.attachments[slotIndex] || {})) {
             if (!attachment?.region || seen.has(attachment)) continue;
             seen.add(attachment);
-            this.chromaAttachments.push({ attachment, region: attachment.region, slotName });
+            this.chromaAttachments.push({ attachment, region: attachment.region, slotName, attachmentName, role: chromaRole(slotName, attachmentName) });
           }
         }
       }
@@ -277,8 +285,11 @@
         const packedHeight = region.rotate ? region.width : region.height;
         const key = `${region.x},${region.y},${packedWidth},${packedHeight}`;
         const existing = regions.get(key);
-        const role = /head/i.test(item.slotName) ? 'head' : 'body';
-        if (existing) existing.role = existing.role === 'head' || role === 'head' ? 'head' : 'body';
+        const role = item.role;
+        // If an atlas region is shared by a hood and a head attachment, treat
+        // it as outfit fabric. The hue classifier still protects non-cloth
+        // skin and hair pixels within that image.
+        if (existing) existing.role = existing.role === 'body' || role === 'body' ? 'body' : 'head';
         else regions.set(key, { region, role, packedWidth, packedHeight });
       }
       // Only scan atlas rectangles actually referenced by costume attachments.
@@ -291,11 +302,10 @@
         const height = Math.min(canvas.height - y, Math.ceil(packedHeight));
         if (width <= 0 || height <= 0) continue;
         const pixels = context.getImageData(x, y, width, height);
-        const replacementHue = source === 'ash' && role === 'head' ? (targetHsl.h + .5) % 1 : targetHsl.h;
         for (let index = 0; index < pixels.data.length; index += 4) {
           if (!pixels.data[index + 3] || !sourceMaterial(source, role, pixels.data[index], pixels.data[index + 1], pixels.data[index + 2])) continue;
           const material = rgbToHsl(pixels.data[index] / 255, pixels.data[index + 1] / 255, pixels.data[index + 2] / 255);
-          const [r, g, b] = hslToRgb(replacementHue, Math.max(.42, targetHsl.s * Math.min(1, material.s + .18)), material.l);
+          const [r, g, b] = hslToRgb(targetHsl.h, Math.max(.42, targetHsl.s * Math.min(1, material.s + .18)), material.l);
           pixels.data[index] = r;
           pixels.data[index + 1] = g;
           pixels.data[index + 2] = b;

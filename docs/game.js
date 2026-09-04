@@ -18,12 +18,17 @@
   // Canvas Spine rendering is substantially more expensive than the fixed-step
   // simulation.  Keep its timeline work tied to visible rendering, at a small
   // cadence, rather than advancing every rig for every catch-up physics step.
-  // The local fighter keeps a 15 Hz authored-pose cadence; supporting combat
-  // actors update less often, which is visually smooth for pixel animation
-  // but prevents several mesh-cache refreshes from landing in one frame.
-  const RIG_UPDATE_INTERVAL = 1 / 15;
-  const SECONDARY_RIG_UPDATE_INTERVAL = 1 / 7;
-  const CREATURE_RIG_UPDATE_INTERVAL = 1 / 5;
+  // Desktop local fighters keep a 15 Hz authored-pose cadence; supporting
+  // actors update less often. The phone profile below lowers these expensive
+  // cache refreshes further while preserving full-resolution pose images.
+  const TOUCH_PRESENTATION = Boolean(window.matchMedia?.('(pointer: coarse)').matches && navigator.maxTouchPoints > 0);
+  // On a phone, Canvas Spine's mesh compositing is the limiting factor—not the
+  // 640x360 pixel-art canvas. Keep the native canvas and every source texture
+  // at full quality, but only produce a fresh expensive pose when it can be
+  // presented. Input and collision simulation remain at the fixed 60 Hz rate.
+  const RIG_UPDATE_INTERVAL = TOUCH_PRESENTATION ? 1 / 6 : 1 / 15;
+  const SECONDARY_RIG_UPDATE_INTERVAL = TOUCH_PRESENTATION ? 1 / 3 : 1 / 7;
+  const CREATURE_RIG_UPDATE_INTERVAL = TOUCH_PRESENTATION ? 1 / 2 : 1 / 5;
   const rigRenderState = new WeakMap();
   // One display tall and exactly three landscape camera widths wide.
   const WORLD = { width: 1920, height: 360 };
@@ -32,7 +37,11 @@
   // player. Distant AI receives a cadence-preserving heartbeat instead.
   const AI_FULL_SIMULATION_RADIUS = VIEW.width + 96;
   const AI_BACKGROUND_INTERVAL = 12;
-  const RENDER_INTERVAL_MS = 1000 / 60;
+  // iPhone browsers can fall behind badly when several weighted Spine meshes
+  // are recomposited at desktop cadence. A 15 Hz presentation budget is high
+  // enough for responsive touch play and reserves each render slot for the
+  // full-quality cached pose instead of dropping into a 1 FPS backlog.
+  const RENDER_INTERVAL_MS = 1000 / (TOUCH_PRESENTATION ? 15 : 60);
   const PLAYER_HALF_W = 9;
   const PLAYER_H = 34;
   const PLAYER_CROUCH_H = 21;
