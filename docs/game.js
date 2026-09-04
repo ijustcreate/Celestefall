@@ -14,6 +14,8 @@
   // simulation.  Keep its timeline work tied to visible rendering, at a small
   // cadence, rather than advancing every rig for every catch-up physics step.
   const RIG_UPDATE_INTERVAL = 1 / 20;
+  const SECONDARY_RIG_UPDATE_INTERVAL = 1 / 12;
+  const CREATURE_RIG_UPDATE_INTERVAL = 1 / 10;
   const rigRenderState = new WeakMap();
   // One display tall and exactly three landscape camera widths wide.
   const WORLD = { width: 1920, height: 360 };
@@ -42,8 +44,7 @@
   };
   const images = {};
   let backgroundLayer = null;
-  let staticPlatformLayer = null;
-  let viewportShadeLayer = null;
+  let nextRoomPublishAt = 0;
 
   function makeNoteSprite(fill, stroke) {
     const surface = document.createElement('canvas');
@@ -111,7 +112,7 @@
     }) : null
   ]));
 
-  function prepareRigForRender(rig, animation) {
+  function prepareRigForRender(rig, animation, interval = RIG_UPDATE_INTERVAL) {
     if (!rig?.ready) return;
     const now = performance.now();
     const previous = rigRenderState.get(rig);
@@ -121,7 +122,7 @@
       return;
     }
     const elapsed = (now - previous.lastUpdate) / 1000;
-    if (elapsed >= RIG_UPDATE_INTERVAL) {
+    if (elapsed >= interval) {
       rig.update(Math.min(elapsed, .1), animation);
       previous.lastUpdate = now;
     }
@@ -394,21 +395,28 @@
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
-  function solids(includeOneWay = false) {
-    return fixed.concat(game.movers.filter(m => includeOneWay || m.kind === 'solid'));
+  function firstCollision(list, left, top, right, bottom, solidOnly = false) {
+    for (const surface of list) {
+      if (solidOnly && surface.kind !== 'solid') continue;
+      if (left < surface.x + surface.w && right > surface.x && top < surface.y + surface.h && bottom > surface.y) return surface;
+    }
+    return null;
   }
 
   function collidesSolid(x, y, height) {
-    const r = rectAt(x, y, height);
-    return solids(false).find(s => overlap(r, s)) || null;
+    const resolvedHeight = height ?? (game.player.crouching ? PLAYER_CROUCH_H : PLAYER_H);
+    const left = x - PLAYER_HALF_W, right = x + PLAYER_HALF_W, top = y - resolvedHeight;
+    return firstCollision(fixed, left, top, right, y) || firstCollision(game.movers, left, top, right, y, true);
   }
 
   function standingSurface(x = game.player.x, y = game.player.y) {
-    const feet = rectAt(x, y + 1);
-    for (const s of fixed.concat(ledges, game.movers)) {
-      if (s.kind === 'oneway' && game.player.dropping > 0) continue;
-      if (feet.y + feet.h < s.y || feet.y + feet.h > s.y + 2) continue;
-      if (feet.x < s.x + s.w && feet.x + feet.w > s.x) return s;
+    const left = x - PLAYER_HALF_W, right = x + PLAYER_HALF_W, bottom = y + 1;
+    for (const list of [fixed, ledges, game.movers]) {
+      for (const surface of list) {
+        if (surface.kind === 'oneway' && game.player.dropping > 0) continue;
+        if (bottom < surface.y || bottom > surface.y + 2) continue;
+        if (left < surface.x + surface.w && right > surface.x) return surface;
+      }
     }
     return null;
   }
@@ -445,9 +453,13 @@
       const solid = collidesSolid(p.x, p.y + direction);
       let oneWay = null;
       if (!solid && direction > 0 && p.dropping <= 0) {
-        const next = rectAt(p.x, p.y + direction);
         const previousBottom = p.y;
-        oneWay = ledges.concat(game.movers).find(s => s.kind === 'oneway' && previousBottom <= s.y + 1 && overlap(next, s));
+        const nextBottom = p.y + direction;
+        const left = p.x - PLAYER_HALF_W, right = p.x + PLAYER_HALF_W;
+        for (const list of [ledges, game.movers]) {
+          oneWay = list.find(surface => surface.kind === 'oneway' && previousBottom <= surface.y + 1 && nextBottom > surface.y && left < surface.x + surface.w && right > surface.x) || null;
+          if (oneWay) break;
+        }
       }
       if (solid || oneWay) {
         p.vy = 0;
@@ -503,15 +515,21 @@
   }
 
   function updateParticles() {
+    let write = 0;
     for (const particle of game.particles) {
       particle.x += particle.vx;
       particle.y += particle.vy;
       particle.vy += .07;
       particle.life -= 1;
+      if (particle.life > 0) game.particles[write++] = particle;
     }
-    game.particles = game.particles.filter(particle => particle.life > 0);
-    for (const burst of game.respawnBursts) burst.life -= 1;
-    game.respawnBursts = game.respawnBursts.filter(burst => burst.life > 0);
+    game.particles.length = write;
+    write = 0;
+    for (const burst of game.respawnBursts) {
+      burst.life -= 1;
+      if (burst.life > 0) game.respawnBursts[write++] = burst;
+    }
+    game.respawnBursts.length = write;
   }
 
   function approach(value, target, amount) {
@@ -525,8 +543,8 @@
   }
 
   function botSolidAt(x, y) {
-    const rect = botRect(x, y);
-    return solids(false).find(surface => overlap(rect, surface)) || null;
+    const left = x - PLAYER_HALF_W, right = x + PLAYER_HALF_W, top = y - PLAYER_H;
+    return firstCollision(fixed, left, top, right, y) || firstCollision(game.movers, left, top, right, y, true);
   }
 
   function botStandingSurface() {
@@ -564,6 +582,8 @@
       y: actor.y - 22 + directionY * 8,
       vx: directionX * speed,
       vy: directionY * speed,
+      trailX: directionX,
+      trailY: directionY,
       life: 105
     });
     emitDust(actor.x + directionX * 12, actor.y - 21 + directionY * 8, 3);
@@ -942,7 +962,11 @@
         hitPlayer(Math.sign(note.vx) * 2.8, -2.5);
       }
     }
-    game.projectiles = game.projectiles.filter(note => note.life > 0 && note.x > 0 && note.x < WORLD.width && note.y > 0 && note.y < WORLD.height);
+    let write = 0;
+    for (const note of game.projectiles) {
+      if (note.life > 0 && note.x > 0 && note.x < WORLD.width && note.y > 0 && note.y < WORLD.height) game.projectiles[write++] = note;
+    }
+    game.projectiles.length = write;
   }
 
   function aimVector() {
@@ -1040,8 +1064,12 @@
   }
 
   function publishRoomState() {
+    if (!game.room?.connected) return;
+    const now = performance.now();
+    if (now < nextRoomPublishAt) return;
+    nextRoomPublishAt = now + 80;
     const p = game.player;
-    game.room?.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: p.alive, respawnTimer: p.respawnTimer });
+    game.room.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: p.alive, respawnTimer: p.respawnTimer });
   }
 
   function connectRoom(config) {
@@ -1052,7 +1080,13 @@
     game.room.addEventListener('presence', event => { game.roomCount = event.detail.count; setRoomStatus(event.detail.count > 1 ? `LIVE · ${event.detail.count}/8` : 'LIVE · WAITING', true); });
     game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); game.remotePlayers.set(member.id, { ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
     game.room.addEventListener('leave', event => game.remotePlayers.delete(event.detail?.id));
-    game.room.addEventListener('state', event => { const remote = event.detail; if (!remote?.id || remote.id === game.room.player.id) return; game.remotePlayers.set(remote.id, { ...(game.remotePlayers.get(remote.id) || {}), ...remote }); });
+    game.room.addEventListener('state', event => {
+      const remote = event.detail;
+      if (!remote?.id || remote.id === game.room.player.id) return;
+      const current = game.remotePlayers.get(remote.id);
+      if (current) Object.assign(current, remote);
+      else game.remotePlayers.set(remote.id, { ...remote });
+    });
     game.room.addEventListener('hit', event => {
       const hit = event.detail;
       // Roster color is the team key, so friendly fire cannot turn a shared
@@ -1295,9 +1329,13 @@
 
   function drawBackdrop() {
     if (backgroundLayer) {
-      const sourceX = Math.max(0, Math.min(WORLD.width - VIEW.width, Math.round(game.camera.x)));
-      ctx.drawImage(backgroundLayer, sourceX, 0, VIEW.width, VIEW.height, 0, 0, canvas.width, canvas.height);
-      if (viewportShadeLayer) ctx.drawImage(viewportShadeLayer, 0, 0);
+      const cameraX = Math.round(game.camera.x);
+      const sourceX = Math.max(0, cameraX);
+      const destinationX = Math.max(0, -cameraX);
+      const visibleWidth = Math.min(VIEW.width - destinationX, WORLD.width - sourceX);
+      ctx.fillStyle = '#090914';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (visibleWidth > 0) ctx.drawImage(backgroundLayer, sourceX, 0, visibleWidth, VIEW.height, destinationX, 0, visibleWidth, VIEW.height);
       return;
     }
     ctx.fillStyle = '#090914';
@@ -1334,56 +1372,81 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
-  function drawRockBlock(block) {
-    const x = Math.round(block.x - game.camera.x);
+  function drawRockBlock(block, target = ctx, cameraX = game.camera.x) {
+    const x = Math.round(block.x - cameraX);
     const y = Math.round(block.y - game.camera.y);
-    if (x + block.w < -24 || x > canvas.width + 24) return;
-    ctx.fillStyle = '#171522';
-    ctx.fillRect(x, y, block.w, block.h);
-    ctx.fillStyle = '#322b42';
+    if (x + block.w < -24 || x > target.canvas.width + 24) return;
+    target.fillStyle = '#171522';
+    target.fillRect(x, y, block.w, block.h);
+    target.fillStyle = '#322b42';
     for (let py = y + 2; py < y + block.h; py += 10) {
       for (let px = x + ((py / 10) % 2 ? 2 : 8); px < x + block.w; px += 14) {
-        ctx.fillRect(px, py, 5, 4);
-        ctx.fillStyle = '#59445f';
-        ctx.fillRect(px + 1, py, 3, 1);
-        ctx.fillStyle = '#322b42';
+        target.fillRect(px, py, 5, 4);
+        target.fillStyle = '#59445f';
+        target.fillRect(px + 1, py, 3, 1);
+        target.fillStyle = '#322b42';
       }
     }
     if (block.w > block.h) {
-      ctx.fillStyle = '#c08a3f';
-      ctx.fillRect(x, y, block.w, 2);
-      ctx.fillStyle = '#6d203d';
-      ctx.fillRect(x, y + 2, block.w, 4);
-      ctx.fillStyle = '#d8aa57';
-      for (let px = x + 4; px < x + block.w; px += 14) ctx.fillRect(px, y + 2, 3, 2);
+      target.fillStyle = '#c08a3f';
+      target.fillRect(x, y, block.w, 2);
+      target.fillStyle = '#6d203d';
+      target.fillRect(x, y + 2, block.w, 4);
+      target.fillStyle = '#d8aa57';
+      for (let px = x + 4; px < x + block.w; px += 14) target.fillRect(px, y + 2, 3, 2);
     }
   }
 
-  function drawThinPlatform(platform) {
-    const x = Math.round(platform.x - game.camera.x);
+  function drawThinPlatform(platform, target = ctx, cameraX = game.camera.x) {
+    const x = Math.round(platform.x - cameraX);
     const y = Math.round(platform.y - game.camera.y);
-    if (x + platform.w < -20 || x > canvas.width + 20) return;
-    ctx.fillStyle = '#160f1b';
-    ctx.fillRect(x - 1, y - 1, platform.w + 2, platform.h + 3);
-    ctx.fillStyle = '#d2a04e';
-    ctx.fillRect(x, y, platform.w, 2);
-    ctx.fillStyle = '#7f254a';
-    ctx.fillRect(x, y + 2, platform.w, Math.max(3, platform.h - 2));
-    ctx.fillStyle = '#b64d6f';
-    ctx.fillRect(x + 4, y + 3, Math.max(1, platform.w - 8), 1);
-    ctx.fillStyle = '#3b2039';
-    for (let px = x + 6; px < x + platform.w - 4; px += 16) ctx.fillRect(px, y + platform.h, 5, 2);
+    if (x + platform.w < -20 || x > target.canvas.width + 20) return;
+    target.fillStyle = '#160f1b';
+    target.fillRect(x - 1, y - 1, platform.w + 2, platform.h + 3);
+    target.fillStyle = '#d2a04e';
+    target.fillRect(x, y, platform.w, 2);
+    target.fillStyle = '#7f254a';
+    target.fillRect(x, y + 2, platform.w, Math.max(3, platform.h - 2));
+    target.fillStyle = '#b64d6f';
+    target.fillRect(x + 4, y + 3, Math.max(1, platform.w - 8), 1);
+    target.fillStyle = '#3b2039';
+    for (let px = x + 6; px < x + platform.w - 4; px += 16) target.fillRect(px, y + platform.h, 5, 2);
+  }
+
+  function buildStaticRenderLayers() {
+    backgroundLayer = document.createElement('canvas');
+    backgroundLayer.width = WORLD.width;
+    backgroundLayer.height = WORLD.height;
+    const background = backgroundLayer.getContext('2d', { alpha: false });
+    background.fillStyle = '#090914';
+    background.fillRect(0, 0, WORLD.width, WORLD.height);
+    background.imageSmoothingEnabled = true;
+    [images.towerBgLeft, images.towerBgCenter, images.towerBgRight].forEach((image, section) => {
+      if (image) background.drawImage(image, section * VIEW.width, 0, VIEW.width, VIEW.height);
+    });
+    const combatVeil = background.createLinearGradient(0, 170, 0, 360);
+    combatVeil.addColorStop(0, 'rgba(6,5,13,0)');
+    combatVeil.addColorStop(.55, 'rgba(6,5,13,.14)');
+    combatVeil.addColorStop(1, 'rgba(6,5,13,.32)');
+    background.fillStyle = combatVeil;
+    background.fillRect(0, 160, WORLD.width, 200);
+    background.imageSmoothingEnabled = false;
+    fixed.forEach(block => drawRockBlock(block, background, 0));
+    ledges.forEach(platform => drawThinPlatform(platform, background, 0));
   }
 
   function drawPlatforms() {
-    fixed.forEach(drawRockBlock);
-    ledges.forEach(drawThinPlatform);
-    game.movers.forEach(drawThinPlatform);
+    if (!backgroundLayer) {
+      fixed.forEach(block => drawRockBlock(block));
+      ledges.forEach(platform => drawThinPlatform(platform));
+    }
+    game.movers.forEach(platform => drawThinPlatform(platform));
   }
 
   function drawCaptureZones() {
     for (const zone of CAPTURE_ZONES) {
       const x = Math.round(zone.x - game.camera.x), progress = (game.captureProgress.get(zone.id) || 0) / CAPTURE_FRAMES, captured = game.capturedZones.get(zone.id);
+      if (x + zone.w < 0 || x > canvas.width) continue;
       ctx.fillStyle = captured?.color || 'rgba(240,194,88,.2)';
       ctx.globalAlpha = captured ? .36 : .12 + progress * .18;
       ctx.fillRect(x, zone.y, zone.w, zone.h);
@@ -1408,6 +1471,7 @@
       const progress = 1 - burst.life / burst.maxLife;
       const x = burst.x - game.camera.x;
       const y = burst.y - 17;
+      if (x < -48 || x > canvas.width + 48) continue;
       ctx.save();
       ctx.globalAlpha = (1 - progress) * .85;
       ctx.strokeStyle = burst.color;
@@ -1485,7 +1549,7 @@
     if (x < -60 || x > canvas.width + 60) return;
 
     if (botRig?.ready) {
-      prepareRigForRender(botRig, bot.animation);
+      prepareRigForRender(botRig, bot.animation, SECONDARY_RIG_UPDATE_INTERVAL);
       botRig.draw(x, y, bot.facing, 1, 1);
     }
     else {
@@ -1511,11 +1575,11 @@
       const x = Math.round((creature.x - game.camera.x) * 2) / 2;
       const y = Math.round(creature.y - game.camera.y);
       if (x < -70 || x > canvas.width + 70) continue;
-      // The player and rival are the close-up combatants. Creature rigs are
-      // much denser Spine meshes, and drawing several of them alongside both
-      // fighters can collapse an embedded canvas to single-digit FPS. Their
-      // lightweight in-engine silhouettes keep all creature gameplay visible.
-      if (creature.type === 'bat') {
+      const rig = creatureRigs.get(creature.id);
+      if (rig?.ready) {
+        prepareRigForRender(rig, creature.animation, CREATURE_RIG_UPDATE_INTERVAL);
+        rig.draw(x, y, creature.type === 'bat' ? -creature.facing : creature.facing, 1, 1);
+      } else if (creature.type === 'bat') {
         ctx.fillStyle = '#53355f';
         ctx.beginPath();
         ctx.moveTo(x, y - 10);
@@ -1546,26 +1610,19 @@
 
   function drawProjectiles() {
     ctx.save();
-    ctx.font = 'bold 15px Georgia, serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     for (const note of game.projectiles) {
       const x = Math.round(note.x - game.camera.x);
       const y = Math.round(note.y - game.camera.y);
-      const speed = Math.hypot(note.vx, note.vy) || 1;
-      const trailX = note.vx / speed;
-      const trailY = note.vy / speed;
+      if (x < -24 || x > canvas.width + 24 || y < -24 || y > canvas.height + 24) continue;
+      const trailX = note.trailX ?? Math.sign(note.vx);
+      const trailY = note.trailY ?? 0;
       ctx.strokeStyle = note.owner === 'player' ? '#fff3b0' : '#8ed7ff';
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(x - trailX * 15, y - trailY * 15);
       ctx.lineTo(x - trailX * 5, y - trailY * 5);
       ctx.stroke();
-      ctx.fillStyle = note.owner === 'player' ? '#ce146c' : '#2267c9';
-      ctx.strokeStyle = '#363542';
-      ctx.lineWidth = 2;
-      ctx.strokeText('♪', x, y);
-      ctx.fillText('♪', x, y);
+      ctx.drawImage(noteSprites[note.owner === 'player' ? 'player' : 'bot'], x - 16, y - 16);
     }
     ctx.restore();
   }
@@ -1595,9 +1652,12 @@
   function drawParticles() {
     ctx.fillStyle = '#f4ecd7';
     for (const particle of game.particles) {
+      const x = Math.round(particle.x - game.camera.x);
+      const y = Math.round(particle.y - game.camera.y);
+      if (x < -2 || x > canvas.width + 2 || y < -2 || y > canvas.height + 2) continue;
       const alpha = Math.min(1, particle.life / 10);
       ctx.globalAlpha = alpha;
-      ctx.fillRect(Math.round(particle.x - game.camera.x), Math.round(particle.y - game.camera.y), 2, 2);
+      ctx.fillRect(x, y, 2, 2);
     }
     ctx.globalAlpha = 1;
   }
@@ -1926,14 +1986,16 @@
     if (!frame.last) frame.last = now;
     frame.accumulator = Math.min(.1, (frame.accumulator || 0) + (now - frame.last) / 1000);
     frame.last = now;
-    if (frame.accumulator >= STEP) {
+    let steps = 0;
+    while (frame.accumulator >= STEP && steps < 2) {
       update();
-      // Rendering must recover promptly on slower embedded devices. Dropping
-      // stale simulation time prevents a slow Spine frame from spawning up to
-      // six more expensive update passes before the next paint.
-      frame.accumulator = 0;
+      frame.accumulator -= STEP;
+      steps += 1;
     }
-    render();
+    if (steps) render();
+    // Never enter an unbounded catch-up spiral after a suspended/backgrounded
+    // tab, but retain two steps so 30 Hz displays keep full-speed simulation.
+    if (steps === 2 && frame.accumulator >= STEP) frame.accumulator = 0;
     requestAnimationFrame(frame);
   }
 
@@ -1963,10 +2025,12 @@
       botRig.failed = true;
       console.error('Player 2 bot failed to load; using the programmatic fallback.', error);
     });
-    // Creature behavior uses the lightweight silhouettes rendered above. Do
-    // not decode four unused high-resolution Spine atlases during startup.
-    const creatureLoads = [];
+    const creatureLoads = [...creatureRigs.values()].filter(Boolean).map(rig => rig.load().catch(error => {
+      rig.failed = true;
+      console.error(`${rig.assetName} creature rig failed to load; using the programmatic fallback.`, error);
+    }));
     await Promise.all([fallbackImages, ashRig, selectableBlueRig, blueRig, ...creatureLoads]);
+    buildStaticRenderLayers();
     activePlayerRig()?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
     game.creatures.forEach(creature => creatureRigs.get(creature.id)?.update(0, creature.animation));

@@ -61,18 +61,22 @@
     return [Math.round((r + match) * 255), Math.round((g + match) * 255), Math.round((b + match) * 255)];
   }
 
-  function sourceMaterial(source, r, g, b) {
+  function sourceMaterial(source, role, r, g, b) {
     const { h, s, l } = rgbToHsl(r / 255, g / 255, b / 255);
     if (s < .35 || l < .055 || l > .92) return false;
     // Ash's costume is a crimson hue; Player 2's is a saturated royal blue.
     // Keeping this test hue-based preserves the facial skin, hair, black line art,
     // metallic weapons, and the neutral shadows on the same attachment image.
-    return source === 'p2' ? h > .55 && h < .66 : h < .055 || h > .91;
+    if (source === 'p2') return h > .57 && h < .65 && s >= .44 && l < .62;
+    // Head art shares a texture region with skin and lip details. Use the
+    // narrower authored-cloth range there; arm/torso slots are clothing-only.
+    if (role === 'head') return (h < .025 || h > .925) && s >= .48 && l < .56;
+    return h < .055 || h > .89;
   }
 
   function costumeSlot(name) {
-    if (/arm|hand|gun|bullet|sword|weapon|slash|damage|frame/i.test(name)) return false;
-    return /head|torso|leg|pelvis|pack/i.test(name);
+    if (/hand|gun|bullet|sword|weapon|slash|damage|frame/i.test(name)) return false;
+    return /head|torso|arm|leg|pelvis|pack/i.test(name);
   }
 
   function slotGroup(name) {
@@ -98,6 +102,10 @@
       this.chromaAttachments = [];
       this.chromaTexture = null;
       this.atlasTexture = null;
+      this.poseCanvas = null;
+      this.poseContext = null;
+      this.poseDirty = true;
+      this.poseAnchor = { x: 160, y: 190 };
       this.ready = false;
       this.failed = false;
       this.currentState = '';
@@ -151,7 +159,15 @@
       const stateData = new spine.AnimationStateData(data);
       stateData.defaultMix = 0.09;
       this.state = new spine.AnimationState(stateData);
-      this.renderer = new spine.canvas.SkeletonRenderer(this.context);
+      // Spine's Canvas renderer clips and draws the full atlas once per mesh
+      // triangle. Render that expensive pose into a small reusable surface only
+      // when the animation advances; ordinary frames become one cheap blit.
+      this.poseCanvas = document.createElement('canvas');
+      this.poseCanvas.width = 320;
+      this.poseCanvas.height = 256;
+      this.poseContext = this.poseCanvas.getContext('2d', { alpha: true });
+      this.poseContext.imageSmoothingEnabled = false;
+      this.renderer = new spine.canvas.SkeletonRenderer(this.poseContext);
       // Ash uses weighted meshes for her torso, hood, and clothing.
       this.renderer.triangleRendering = true;
       this.setState('idle', true);
@@ -167,6 +183,7 @@
       this.state.setAnimation(0, next.name, next.loop);
       this.currentState = logicalState;
       this.currentAnimation = next.name;
+      this.poseDirty = true;
     }
 
     update(delta, logicalState) {
@@ -180,7 +197,7 @@
       if (DRAWN_SWORD_STATES.has(logicalState)) {
         this.skeleton.findSlot('Gun')?.setAttachment(null);
       }
-      this.applyPalette(this.palette);
+      this.poseDirty = true;
     }
 
     listBaseSkins() {
@@ -193,6 +210,7 @@
       this.skeleton.setSkinByName(name);
       this.skeleton.setSlotsToSetupPose();
       this.applyPalette(this.palette);
+      this.poseDirty = true;
       return true;
     }
 
@@ -206,7 +224,7 @@
           for (const attachment of Object.values(skin.attachments[slotIndex] || {})) {
             if (!attachment?.region || seen.has(attachment)) continue;
             seen.add(attachment);
-            this.chromaAttachments.push({ attachment, region: attachment.region });
+            this.chromaAttachments.push({ attachment, region: attachment.region, slotName });
           }
         }
       }
@@ -220,18 +238,40 @@
       canvas.height = image.height;
       const context = canvas.getContext('2d', { willReadFrequently: true });
       context.drawImage(image, 0, 0);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
       const target = colorChannels(color);
       const targetHsl = rgbToHsl(target.r, target.g, target.b);
-      for (let index = 0; index < pixels.data.length; index += 4) {
-        if (!pixels.data[index + 3] || !sourceMaterial(source, pixels.data[index], pixels.data[index + 1], pixels.data[index + 2])) continue;
-        const material = rgbToHsl(pixels.data[index] / 255, pixels.data[index + 1] / 255, pixels.data[index + 2] / 255);
-        const [r, g, b] = hslToRgb(targetHsl.h, Math.max(.42, targetHsl.s * Math.min(1, material.s + .18)), material.l);
-        pixels.data[index] = r;
-        pixels.data[index + 1] = g;
-        pixels.data[index + 2] = b;
+      const regions = new Map();
+      for (const item of this.chromaAttachments) {
+        const region = item.region;
+        const packedWidth = region.rotate ? region.height : region.width;
+        const packedHeight = region.rotate ? region.width : region.height;
+        const key = `${region.x},${region.y},${packedWidth},${packedHeight}`;
+        const existing = regions.get(key);
+        const role = /head/i.test(item.slotName) ? 'head' : 'body';
+        if (existing) existing.role = existing.role === 'head' || role === 'head' ? 'head' : 'body';
+        else regions.set(key, { region, role, packedWidth, packedHeight });
       }
-      context.putImageData(pixels, 0, 0);
+      // Only scan atlas rectangles actually referenced by costume attachments.
+      // This avoids a multi-million-pixel main-thread pass when a color changes.
+      for (const entry of regions.values()) {
+        const { region, role, packedWidth, packedHeight } = entry;
+        const x = Math.max(0, Math.floor(region.x));
+        const y = Math.max(0, Math.floor(region.y));
+        const width = Math.min(canvas.width - x, Math.ceil(packedWidth));
+        const height = Math.min(canvas.height - y, Math.ceil(packedHeight));
+        if (width <= 0 || height <= 0) continue;
+        const pixels = context.getImageData(x, y, width, height);
+        const replacementHue = source === 'ash' && role === 'head' ? (targetHsl.h + .5) % 1 : targetHsl.h;
+        for (let index = 0; index < pixels.data.length; index += 4) {
+          if (!pixels.data[index + 3] || !sourceMaterial(source, role, pixels.data[index], pixels.data[index + 1], pixels.data[index + 2])) continue;
+          const material = rgbToHsl(pixels.data[index] / 255, pixels.data[index + 1] / 255, pixels.data[index + 2] / 255);
+          const [r, g, b] = hslToRgb(replacementHue, Math.max(.42, targetHsl.s * Math.min(1, material.s + .18)), material.l);
+          pixels.data[index] = r;
+          pixels.data[index + 1] = g;
+          pixels.data[index + 2] = b;
+        }
+        context.putImageData(pixels, x, y);
+      }
       return new spine.Texture(canvas);
     }
 
@@ -241,8 +281,12 @@
       if (!this.chromaTexture) return false;
       for (const item of this.chromaAttachments) {
         const region = Object.assign(Object.create(Object.getPrototypeOf(item.region)), item.region, { texture: this.chromaTexture });
+        // Mesh rendering reads through region.renderObject while ordinary
+        // attachments read region.texture. Point both at the recolored clone.
+        region.renderObject = region;
         item.attachment.region = region;
       }
+      this.poseDirty = true;
       return true;
     }
 
@@ -268,7 +312,9 @@
       // Ash or blue P2 pixels on costume attachments are replaced. The same
       // head images retain their skin/hair pixels, and all weapon attachments
       // continue to use the untouched source texture.
-      this.teamChroma = { source: source === 'p2' ? 'p2' : 'ash', color: normalizeHex(color) };
+      const next = { source: source === 'p2' ? 'p2' : 'ash', color: normalizeHex(color) };
+      if (this.teamChroma?.source === next.source && this.teamChroma?.color === next.color) return { ...this.palette };
+      this.teamChroma = next;
       this.applyTeamChroma();
       return this.applyPalette({ head: '#ffffff', body: '#ffffff', gear: '#ffffff', weapon: '#ffffff' });
     }
@@ -279,13 +325,22 @@
 
     draw(x, y, facing, stretch = 1, squash = 1) {
       if (!this.ready) return;
-      const skeleton = this.skeleton;
-      skeleton.x = x;
-      skeleton.y = y;
-      skeleton.scaleX = facing * stretch;
-      skeleton.scaleY = -squash;
-      skeleton.updateWorldTransform();
-      this.renderer.draw(skeleton);
+      if (this.poseDirty) {
+        const skeleton = this.skeleton;
+        this.poseContext.clearRect(0, 0, this.poseCanvas.width, this.poseCanvas.height);
+        skeleton.x = this.poseAnchor.x;
+        skeleton.y = this.poseAnchor.y;
+        skeleton.scaleX = 1;
+        skeleton.scaleY = -1;
+        skeleton.updateWorldTransform();
+        this.renderer.draw(skeleton);
+        this.poseDirty = false;
+      }
+      this.context.save();
+      this.context.translate(Math.round(x), Math.round(y));
+      this.context.scale(facing * stretch, squash);
+      this.context.drawImage(this.poseCanvas, -this.poseAnchor.x, -this.poseAnchor.y);
+      this.context.restore();
     }
   }
 
