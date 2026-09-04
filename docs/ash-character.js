@@ -149,7 +149,7 @@
       this.poseCanvas = null;
       this.poseContext = null;
       this.poseDirty = true;
-      this.poseAnchor = { x: 160, y: 190 };
+      this.poseAnchor = { x: 112, y: 176 };
       this.ready = false;
       this.failed = false;
       this.currentState = '';
@@ -190,8 +190,11 @@
       // triangle. Render that expensive pose into a small reusable surface only
       // when the animation advances; ordinary frames become one cheap blit.
       this.poseCanvas = document.createElement('canvas');
-      this.poseCanvas.width = 320;
-      this.poseCanvas.height = 256;
+      // The authored figures occupy a small area of the former 320×256 pose
+      // surface. Tight bounds keep the exact pixel scale while cutting each
+      // per-frame transparent-canvas composite nearly in half.
+      this.poseCanvas.width = 224;
+      this.poseCanvas.height = 224;
       this.poseContext = this.poseCanvas.getContext('2d', { alpha: true });
       this.poseContext.imageSmoothingEnabled = false;
       this.renderer = new spine.canvas.SkeletonRenderer(this.poseContext);

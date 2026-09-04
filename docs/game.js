@@ -18,13 +18,21 @@
   // Canvas Spine rendering is substantially more expensive than the fixed-step
   // simulation.  Keep its timeline work tied to visible rendering, at a small
   // cadence, rather than advancing every rig for every catch-up physics step.
-  const RIG_UPDATE_INTERVAL = 1 / 20;
-  const SECONDARY_RIG_UPDATE_INTERVAL = 1 / 12;
-  const CREATURE_RIG_UPDATE_INTERVAL = 1 / 10;
+  // The local fighter keeps a 15 Hz authored-pose cadence; supporting combat
+  // actors update less often, which is visually smooth for pixel animation
+  // but prevents several mesh-cache refreshes from landing in one frame.
+  const RIG_UPDATE_INTERVAL = 1 / 15;
+  const SECONDARY_RIG_UPDATE_INTERVAL = 1 / 7;
+  const CREATURE_RIG_UPDATE_INTERVAL = 1 / 5;
   const rigRenderState = new WeakMap();
   // One display tall and exactly three landscape camera widths wide.
   const WORLD = { width: 1920, height: 360 };
   const VIEW = { width: 640, height: 360 };
+  // Fully simulate opponents only where their decisions can affect the local
+  // player. Distant AI receives a cadence-preserving heartbeat instead.
+  const AI_FULL_SIMULATION_RADIUS = VIEW.width + 96;
+  const AI_BACKGROUND_INTERVAL = 12;
+  const RENDER_INTERVAL_MS = 1000 / 60;
   const PLAYER_HALF_W = 9;
   const PLAYER_H = 34;
   const PLAYER_CROUCH_H = 21;
@@ -325,6 +333,7 @@
   // exercise a room-sized render/update load without exposing test controls in
   // ordinary game sessions.
   if (new URLSearchParams(location.search).get('perf') === '1') {
+    window.__encorePerformance ||= {};
     window.__encorePerformance.seedRemotePlayers = count => {
       for (let index = 0; index < count; index += 1) {
         upsertRemote({
@@ -342,6 +351,7 @@
       }
       return { players: game.remotePlayers.size, cells: game.remoteCells.size };
     };
+    window.__encorePerformance.getFrameStats = () => ({ renders: frame.renderCount || 0, updates: frame.updateCount || 0 });
   }
   // The game can be hosted separately from the karaoke site.  Lock event
   // traffic to the direct parent that supplies the first valid session.
@@ -910,8 +920,30 @@
     else creature.animation = 'idle';
   }
 
+  function creatureNeedsFullSimulation(creature) {
+    return creature.hitTimer > 0 || creature.attackTimer > 0 || Math.abs(game.player.x - creature.x) <= AI_FULL_SIMULATION_RADIUS;
+  }
+
+  function updateBackgroundCreature(creature) {
+    if (!creature.alive) {
+      creature.respawnTimer -= AI_BACKGROUND_INTERVAL;
+      creature.animation = 'death';
+      if (creature.respawnTimer <= 0) respawnCreature(creature);
+      return;
+    }
+    creature.attackCooldown = Math.max(0, creature.attackCooldown - AI_BACKGROUND_INTERVAL);
+    creature.phase += (creature.type === 'bat' ? .045 : .02) * AI_BACKGROUND_INTERVAL;
+    // Preserve the authored idle/run state for the next visible frame without
+    // evaluating steering, collision, or attack geometry offscreen.
+    creature.animation = creature.type === 'bat' || Math.abs(creature.vx) > .12 ? 'run' : 'idle';
+  }
+
   function updateCreatures() {
-    game.creatures.forEach(updateCreature);
+    for (let index = 0; index < game.creatures.length; index += 1) {
+      const creature = game.creatures[index];
+      if (creatureNeedsFullSimulation(creature)) updateCreature(creature);
+      else if ((game.frame + index) % AI_BACKGROUND_INTERVAL === 0) updateBackgroundCreature(creature);
+    }
   }
 
   function meleeHitbox(actor, direction) {
@@ -2115,10 +2147,18 @@
     let steps = 0;
     while (frame.accumulator >= STEP && steps < 2) {
       update();
+      frame.updateCount = (frame.updateCount || 0) + 1;
       frame.accumulator -= STEP;
       steps += 1;
     }
-    if (steps) render();
+    // Presentation is independent from fixed simulation. Rendering only when
+    // a physics step lands can skip alternating 60 Hz frames due to fractional
+    // clock deltas; cap high-refresh displays at 60 instead of painting twice.
+    if (!frame.lastRender || now - frame.lastRender >= RENDER_INTERVAL_MS - .5) {
+      render();
+      frame.renderCount = (frame.renderCount || 0) + 1;
+      frame.lastRender = now;
+    }
     // Never enter an unbounded catch-up spiral after a suspended/backgrounded
     // tab, but retain two steps so 30 Hz displays keep full-speed simulation.
     if (steps === 2 && frame.accumulator >= STEP) frame.accumulator = 0;
