@@ -56,6 +56,9 @@
       for (const [id, member] of this.members) {
         if (id !== this.player.id && !wasHere.has(id)) this.dispatchEvent(new CustomEvent('join', { detail: member }));
       }
+      for (const id of wasHere) {
+        if (id !== this.player.id && !this.members.has(id)) this.dispatchEvent(new CustomEvent('leave', { detail: { id } }));
+      }
       this.dispatchEvent(new CustomEvent('presence', { detail: { count: this.members.size, full: !accepted.has(this.player.id) } }));
       if (!accepted.has(this.player.id)) this.dispatchEvent(new CustomEvent('full'));
     }

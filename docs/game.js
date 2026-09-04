@@ -169,6 +169,9 @@
     room: null,
     roomCount: 0
   };
+  // The game can be hosted separately from the karaoke site.  Lock event
+  // traffic to the direct parent that supplies the first valid session.
+  let parentOrigin = null;
 
   const localAdminPreview = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) && new URLSearchParams(location.search).get('admin') === '1';
   void localAdminPreview;
@@ -303,7 +306,7 @@
   }
 
   function emitGameEvent(event, payload = {}) {
-    if (window.parent !== window) window.parent.postMessage({ type: 'bcd:encore:event', event, payload }, location.origin);
+    if (window.parent !== window) window.parent.postMessage({ type: 'bcd:encore:event', event, payload }, parentOrigin || '*');
   }
 
   function setRoomStatus(text, online = false) {
@@ -961,6 +964,7 @@
     game.room.addEventListener('status', event => setRoomStatus(event.detail.connected ? 'LIVE ROOM' : 'OFFLINE PRACTICE', event.detail.connected));
     game.room.addEventListener('presence', event => { game.roomCount = event.detail.count; setRoomStatus(event.detail.count > 1 ? `LIVE · ${event.detail.count}/8` : 'LIVE · WAITING', true); });
     game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); game.remotePlayers.set(member.id, { ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
+    game.room.addEventListener('leave', event => game.remotePlayers.delete(event.detail?.id));
     game.room.addEventListener('state', event => { const remote = event.detail; if (!remote?.id || remote.id === game.room.player.id) return; game.remotePlayers.set(remote.id, { ...(game.remotePlayers.get(remote.id) || {}), ...remote }); });
     game.room.addEventListener('hit', event => { const hit = event.detail; if (hit?.targetId === game.room.player.id) { game.lastAttacker = hit.attackerId; hitPlayer(hit.x || 0, hit.y || -2); } });
     game.room.addEventListener('eliminated', event => { const result = event.detail; if (result?.killerId === game.room.player.id) { game.kills += 1; emitGameEvent('first_pk', { victimId: result.victimId }); } });
@@ -1637,9 +1641,10 @@
   }
 
   window.addEventListener('message', event => {
-    const trustedParent = event.source === window.parent && event.origin === location.origin;
+    const trustedParent = event.source === window.parent && (!parentOrigin || event.origin === parentOrigin);
     if (event.data?.type === 'bcd:encore:init') {
       if (!trustedParent) return;
+      parentOrigin = event.origin;
       game.playerName = event.data.payload?.playerName || 'Climber';
       connectRoom(event.data.payload || {});
     }
