@@ -13,3 +13,7 @@ The canonical public path is `/bcd-kc-encore/`. `/Celestefall/` remains compatib
 Includes server-authoritative multiplayer code, safe random respawns, shared 50% heart drops and healing, falling bat corpses, platform-aligned capture markers with team-color fill/contested display, account display names, and health dots without a backing bar. Online play requires the dedicated WebSocket server described in `../server/README.md`. Until `authority-config.js` contains a verified public endpoint, the published game explicitly runs **OFFLINE PRACTICE**; the server code being present in GitHub does not mean a server is running.
 
 Do not deploy multiple overlapping server processes or advertise live shared play before multi-client public verification. The unpublished WebGL2 renderer checkout remains separate; 1.1 retains the v1.0 Canvas renderer and the published Player Two idle-head fix.
+
+## 1.2
+
+Fixes offline capture markers so the local team's progress is merged into the per-color fill map during intermediate capture, before ownership completes.

@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_VERSION = '1.1';
+  const BUILD_VERSION = '1.2';
   let disposed = false;
   let animationFrame = 0;
 
@@ -1329,6 +1329,8 @@
     });
     game.room.addEventListener('status', event => {
       const { connected, reason } = event.detail;
+      // EncoreRoom owns these fields; the HUD and diagnostics both consume
+      // the same admission/status contract rather than inferring from count.
       const labels = { offline: 'OFFLINE PRACTICE', connecting: 'CONNECTING', reconnecting: 'RECONNECTING · PAUSED', room_full: 'ROOM FULL', server_full: 'SERVER FULL', invalid_server: 'SERVER UNAVAILABLE', session_replaced: 'SESSION OPEN ELSEWHERE', version_mismatch: 'RELOAD REQUIRED', left: 'DISCONNECTED' };
       const count = Number.isSafeInteger(event.detail.count) && event.detail.count >= 0 && event.detail.count <= 8 ? event.detail.count : null;
       const fullLabel = reason === 'room_full' && count !== null ? `ROOM FULL · ${count}/8` : labels[reason] || 'SERVER UNAVAILABLE';
@@ -1712,9 +1714,11 @@
       if (x + zone.w < 0 || x > canvas.width) continue;
       const captured = game.capturedZones.get(zone.id);
       // Use all server colors so remote progress never takes the viewer's color.
-      const colors = game.captureProgressByColor?.get(zone.id) ?? {
-        [game.loadout.color]: game.captureProgress.get(zone.id) || 0
-      };
+      const colors = { ...(game.captureProgressByColor?.get(zone.id) || {}) };
+      // Offline practice advances the legacy local counter directly; merge it
+      // into the color map so the marker fills before ownership completes.
+      const localFrames = game.captureProgress.get(zone.id) || 0;
+      colors[game.loadout.color] = Math.max(colors[game.loadout.color] || 0, localFrames);
       const challengers = Object.entries(colors)
         .filter(([color, frames]) => color !== captured?.color && Number.isFinite(frames) && frames > 0)
         .sort(([a], [b]) => a.localeCompare(b));
@@ -2290,7 +2294,8 @@
     room: { players: game.roomCount, connected: Boolean(game.room?.connected), authoritative: Boolean(game.room?.authoritative), tick: game.room?.tick ?? null, epoch: game.room?.epoch ?? null, remotes: [...game.remotePlayers.values()].map(player => ({ id:player.id, name:player.name, x:Math.round(player.x), y:Math.round(player.y), health:player.health, alive:player.alive, animation:player.animation })) },
     captureZones: CAPTURE_ZONES.map(zone => {
       const captured = game.capturedZones.get(zone.id);
-      const colors = game.captureProgressByColor?.get(zone.id) ?? { [game.loadout.color]: game.captureProgress.get(zone.id) || 0 };
+      const colors = { ...(game.captureProgressByColor?.get(zone.id) || {}) };
+      colors[game.loadout.color] = Math.max(colors[game.loadout.color] || 0, game.captureProgress.get(zone.id) || 0);
       return { id:zone.id, color:captured?.color || null, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), progressByColor:Object.fromEntries(Object.entries(colors).map(([color, frames]) => [color, Math.round(Math.max(0, Math.min(100, frames / 1.8)))])), contested:game.captureContested?.has(zone.id) || false, capturedBy:captured?.contributors?.map(member => member.name) || [] };
     })
   });
