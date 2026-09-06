@@ -503,3 +503,9 @@ body.skin-editor-open .character-carousel { pointer-events: none; }
   .action-button span { inset-block-end: -18px; font-size: 9px; }
   .touch-hint { display: none; }
 }
+
+/* Reserve the host reload control's column on narrow embedded screens. */
+.is-embedded .character-select{max-width:calc(100% - 152px)}
+.is-embedded .color-choice{max-width:100%}
+.is-embedded #colorOptions{flex-wrap:wrap;min-width:0}
+.is-embedded .game-shell{grid-template-columns:minmax(0,1fr)}

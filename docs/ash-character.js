@@ -46,7 +46,7 @@
         }
       };
       image.onerror = () => reject(new Error(`Could not load ${source}`));
-      image.src = source;
+      image.src = window.encoreAssetUrl(source);
     });
   }
 
@@ -57,11 +57,11 @@
       const atlasPath = `${key}.atlas`;
       const texturePath = `${key}.png`;
       sourceAssetCache.set(key, Promise.all([
-        fetch(jsonPath).then(response => {
+        fetch(window.encoreAssetUrl(jsonPath)).then(response => {
           if (!response.ok) throw new Error(`Could not load ${jsonPath}: ${response.status}`);
           return response.text();
         }),
-        fetch(atlasPath).then(response => {
+        fetch(window.encoreAssetUrl(atlasPath)).then(response => {
           if (!response.ok) throw new Error(`Could not load ${atlasPath}: ${response.status}`);
           return response.text();
         }),

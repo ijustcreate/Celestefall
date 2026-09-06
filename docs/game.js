@@ -1,6 +1,10 @@
 (() => {
   'use strict';
 
+  const BUILD_VERSION = '1.0';
+  let disposed = false;
+  let animationFrame = 0;
+
   if (window.parent !== window || new URLSearchParams(location.search).get('embed') === '1') {
     document.body.classList.add('is-embedded');
   }
@@ -2023,15 +2027,30 @@
   window.addEventListener('message', event => {
     const trustedParent = event.source === window.parent && (!parentOrigin || event.origin === parentOrigin);
     if (event.data?.type === 'bcd:encore:init') {
-      if (!trustedParent) return;
+      if (!trustedParent || disposed) return;
       parentOrigin = event.origin;
       game.playerName = event.data.payload?.playerName || 'Climber';
       connectRoom(event.data.payload || {});
     }
-    // Closing the host overlay never pauses or rewinds this always-live simulation.
+    if (trustedParent && event.data?.type === 'bcd:encore:command' && event.data.payload?.command === 'close') {
+      shutdown().finally(() => window.parent.postMessage({ type: 'bcd:encore:disposed' }, event.origin));
+    }
   });
 
+  let shutdownPromise;
+  function shutdown() {
+    if (shutdownPromise) return shutdownPromise;
+    disposed = true;
+    cancelAnimationFrame(animationFrame);
+    clearTimeout(helpTimer);
+    shutdownPromise = Promise.resolve(game.room?.leave()).catch(() => {});
+    return shutdownPromise;
+  }
+  window.addEventListener('pagehide', () => { shutdown(); });
+
   window.render_game_to_text = () => JSON.stringify({
+    buildVersion: BUILD_VERSION,
+    disposed,
     coordinateSystem: 'origin top-left; x increases right; y increases down; world units are pixels',
     mode: game.mode,
     world: WORLD,
@@ -2150,6 +2169,7 @@
   };
 
   function frame(now) {
+    if (disposed) return;
     if (!frame.last) frame.last = now;
     frame.accumulator = Math.min(.1, (frame.accumulator || 0) + (now - frame.last) / 1000);
     frame.last = now;
@@ -2171,7 +2191,7 @@
     // Never enter an unbounded catch-up spiral after a suspended/backgrounded
     // tab, but retain two steps so 30 Hz displays keep full-speed simulation.
     if (steps === 2 && frame.accumulator >= STEP) frame.accumulator = 0;
-    requestAnimationFrame(frame);
+    animationFrame = requestAnimationFrame(frame);
   }
 
   async function boot() {
@@ -2180,13 +2200,13 @@
     setupLoadoutControls();
     resetGame();
     render();
-    requestAnimationFrame(frame);
+    animationFrame = requestAnimationFrame(frame);
 
     const fallbackImages = Promise.all(Object.entries(imageSources).map(([key, source]) => new Promise(resolve => {
       const image = new Image();
       image.onload = () => { images[key] = image; resolve(); };
       image.onerror = () => resolve();
-      image.src = source;
+      image.src = window.encoreAssetUrl(source);
     })));
     const ashRig = ash?.load().catch(error => {
       ash.failed = true;
@@ -2205,12 +2225,13 @@
       console.error(`${rig.assetName} creature rig failed to load; using the programmatic fallback.`, error);
     }));
     await Promise.all([fallbackImages, ashRig, selectableBlueRig, blueRig, ...creatureLoads]);
+    if (disposed) return;
     buildStaticRenderLayers();
     activePlayerRig()?.update(0, game.player.animation);
     botRig?.update(0, game.bot.animation);
     game.creatures.forEach(creature => creatureRigs.get(creature.id)?.update(0, creature.animation));
     render();
-    window.parent?.postMessage({ type: 'bcd:encore:ready' }, '*');
+    window.parent?.postMessage({ type: 'bcd:encore:ready', version: BUILD_VERSION }, '*');
   }
 
   boot();

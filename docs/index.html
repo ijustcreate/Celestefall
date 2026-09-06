@@ -6,7 +6,20 @@
   <meta name="theme-color" content="#363542">
   <title>BCDKC Encore Royal</title>
   <link rel="icon" href="assets/ash/Ash.png">
-  <link rel="stylesheet" href="styles.css?v=20260904-mobile15-ui">
+  <script>
+    // A new iframe document gets new URLs for every first-party build asset.
+    // Keep relative paths on Celestefall so storage and the parent handshake survive.
+    window.encoreAssetUrl = function (source) {
+      const url = new URL(source, location.href);
+      const fresh = new URLSearchParams(location.search).get('fresh');
+      if (fresh && url.origin === location.origin) url.searchParams.set('fresh', fresh);
+      return url.href;
+    };
+    const style = document.createElement('link');
+    style.rel = 'stylesheet';
+    style.href = encoreAssetUrl('styles.css?v=20260905-reload1');
+    document.head.append(style);
+  </script>
 </head>
 <body>
   <main class="game-shell" aria-label="BCDKC Encore Royal game">
@@ -111,10 +124,26 @@
       </div>
     </section>
   </main>
-  <script src="vendor/spine-3.7/spine-canvas.js?v=3.7.94"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="ash-character.js?v=20260904-hood-color"></script>
-  <script src="room-client.js?v=20260903-royal-room"></script>
-  <script src="game.js?v=20260904-mobile15"></script>
+  <script>
+    (async () => {
+      for (const source of [
+        'vendor/spine-3.7/spine-canvas.js?v=3.7.94',
+        'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js',
+        'ash-character.js?v=20260905-reload1',
+        'room-client.js?v=20260905-reload1',
+        'game.js?v=20260905-reload1'
+      ]) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = encoreAssetUrl(source);
+          script.onload = resolve;
+          script.onerror = () => reject(new Error('Could not load ' + source));
+          document.body.append(script);
+        });
+      }
+    })().catch(() => {
+      document.getElementById('roomStatus').textContent = 'LOAD FAILED · RETRY RELOAD';
+    });
+  </script>
 </body>
 </html>

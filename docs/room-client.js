@@ -74,10 +74,13 @@
       if (this.connected && this.channel) this.channel.send({ type: 'broadcast', event, payload });
     }
 
-    leave() {
-      this.channel?.unsubscribe();
-      this.client?.removeAllChannels();
+    async leave() {
       this.connected = false;
+      const client = this.client;
+      this.channel = null;
+      this.client = null;
+      try { await client?.removeAllChannels(); }
+      finally { client?.realtime.disconnect(); }
     }
   }
 
