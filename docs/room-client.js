@@ -14,12 +14,17 @@
       try { this.resumeToken = sessionStorage.getItem(this.storageKey); } catch { this.resumeToken = null; }
     }
     emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
-    clearMembers(reason) {
+    clearMembers(reason, count = null) {
       this.connected = false;
       for (const id of this.members.keys()) if (id !== this.player.id) this.emit('leave', { id });
       this.members.clear();
-      this.emit('presence', { count: 0, connected: false, full: reason === 'room_full' });
-      this.emit('status', { connected: false, reason });
+      // A rejected/disconnected client has no authoritative presence list.
+      // Keep occupancy unknown instead of turning the cleared local map into
+      // a false zero. A server-provided count is safe to retain for a full
+      // response, but only when it is an actual bounded integer.
+      const verifiedCount = Number.isSafeInteger(count) && count >= 0 && count <= 8 ? count : null;
+      this.emit('presence', { count: verifiedCount, connected: false, full: reason === 'room_full', verified: verifiedCount !== null });
+      this.emit('status', { connected: false, reason, count: verifiedCount, verified: verifiedCount !== null });
     }
     setInputSource(source) { this.inputSource = source; }
     async connect() {
@@ -50,8 +55,8 @@
         if (this.stopped || this.socket !== socket) return;
         let msg; try { msg = JSON.parse(event.data); } catch { return; }
         if (msg.type === 'rejected') {
-          terminal = true; this.clearMembers(msg.reason);
-          if (msg.reason === 'room_full' || msg.reason === 'server_full') this.emit('full', { reason: msg.reason });
+          terminal = true; this.clearMembers(msg.reason, msg.count);
+          if (msg.reason === 'room_full' || msg.reason === 'server_full') this.emit('full', { reason: msg.reason, count: msg.count });
           return;
         }
         if (msg.type === 'welcome') {

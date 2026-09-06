@@ -265,7 +265,9 @@
     captureProgress: new Map(),
     respawnBursts: [],
     room: null,
-    roomCount: 0
+    // null means no verified presence snapshot is available. Never render it
+    // as zero: a rejected or disconnected socket has no room occupancy data.
+    roomCount: null
   };
 
   for (const zone of CAPTURE_ZONES) game.remoteCaptureMembers.set(zone.id, new Map());
@@ -1327,17 +1329,20 @@
     });
     game.room.addEventListener('status', event => {
       const { connected, reason } = event.detail;
-      const labels = { offline: 'OFFLINE PRACTICE', connecting: 'CONNECTING', reconnecting: 'RECONNECTING · PAUSED', room_full: 'ROOM FULL · 8/8', server_full: 'SERVER FULL', invalid_server: 'SERVER UNAVAILABLE', session_replaced: 'SESSION OPEN ELSEWHERE', version_mismatch: 'RELOAD REQUIRED', left: 'DISCONNECTED' };
-      setRoomStatus(connected ? `LIVE · ${game.roomCount}/8` : labels[reason] || 'SERVER UNAVAILABLE', connected);
+      const labels = { offline: 'OFFLINE PRACTICE', connecting: 'CONNECTING', reconnecting: 'RECONNECTING · PAUSED', room_full: 'ROOM FULL', server_full: 'SERVER FULL', invalid_server: 'SERVER UNAVAILABLE', session_replaced: 'SESSION OPEN ELSEWHERE', version_mismatch: 'RELOAD REQUIRED', left: 'DISCONNECTED' };
+      const count = Number.isSafeInteger(event.detail.count) && event.detail.count >= 0 && event.detail.count <= 8 ? event.detail.count : null;
+      const fullLabel = reason === 'room_full' && count !== null ? `ROOM FULL · ${count}/8` : labels[reason] || 'SERVER UNAVAILABLE';
+      setRoomStatus(connected ? (game.roomCount === null ? 'LIVE' : `LIVE · ${game.roomCount}/8`) : fullLabel, connected);
       if (!connected) {
-        game.roomCount = 0;
+        game.roomCount = count;
         for (const id of [...game.remotePlayers.keys()]) removeRemote(id);
         if (game.room.authoritative) { game.projectiles.length = 0; game.hearts = []; }
       }
     });
     game.room.addEventListener('presence', event => {
-      game.roomCount = event.detail.count;
-      if (event.detail.connected) setRoomStatus(`LIVE · ${event.detail.count}/8`, true);
+      const count = Number.isSafeInteger(event.detail.count) && event.detail.count >= 0 && event.detail.count <= 8 ? event.detail.count : null;
+      game.roomCount = count;
+      if (event.detail.connected) setRoomStatus(count === null ? 'LIVE' : `LIVE · ${count}/8`, true);
     });
     game.room.addEventListener('snapshot', event => applyAuthoritySnapshot(event.detail));
     game.room.addEventListener('leave', event => removeRemote(event.detail?.id));

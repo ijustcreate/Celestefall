@@ -82,7 +82,7 @@ try {
   session.socket.terminate();
   await desktop.waitForFunction(() => !JSON.parse(window.render_game_to_text()).room.connected);
   const disconnected = await state(desktop);
-  assert.equal(disconnected.room.players,0); assert.equal(disconnected.room.remotes.length,0);
+  assert.equal(disconnected.room.players,null); assert.equal(disconnected.room.remotes.length,0);
   await desktop.waitForFunction(() => JSON.parse(window.render_game_to_text()).room.connected);
   assert.equal(sim.game.players.size,3);
   assert.equal((await state(desktop)).player.health,p.health);
@@ -96,7 +96,7 @@ try {
   extra.on('pageerror', e => errors.push(e.message)); await extra.goto(base);
   await extra.waitForFunction(() => document.getElementById('roomStatus').textContent.includes('ROOM FULL'));
   const full = await state(extra);
-  assert.equal(full.room.connected,false); assert.equal(full.room.players,0); assert.deepEqual(full.room.remotes,[]);
+  assert.equal(full.room.connected,false); assert.equal(full.room.players,8); assert.deepEqual(full.room.remotes,[]);
   assert.equal(sim.game.players.size,8);
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({passed:true,desktop:d,phone:m,disconnected,full,errors},null,2));

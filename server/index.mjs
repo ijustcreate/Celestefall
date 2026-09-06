@@ -49,7 +49,7 @@ export function createAuthority({ origins = [], maxRooms = 32, reconnectMs = 150
     if (ws.bufferedAmount > 128 * 1024) { ws.close(4008, 'slow_connection'); return; }
     ws.send(JSON.stringify(value));
   }
-  function reject(ws, reason) { send(ws, { type: 'rejected', reason }); ws.close(4000, reason); }
+  function reject(ws, reason, details = {}) { send(ws, { type: 'rejected', reason, ...details }); ws.close(4000, reason); }
   function roomSnapshot(room) { return { type: 'snapshot', protocol: PROTOCOL, epoch: room.epoch, ...room.sim.snapshot() }; }
 
   function disconnect(ws) {
@@ -90,7 +90,7 @@ export function createAuthority({ origins = [], maxRooms = 32, reconnectMs = 150
           room.sessions.delete(session.token); room.sim.removePlayer(session.player.id); session = null;
         }
         if (!session) {
-          if (room.sessions.size >= MAX_PLAYERS) { reject(ws, 'room_full'); return; }
+          if (room.sessions.size >= MAX_PLAYERS) { reject(ws, 'room_full', { count: room.sessions.size }); return; }
           const id = randomUUID();
           session = { token: randomBytes(32).toString('base64url'), player: room.sim.addPlayer(id, profile(msg.profile)), socket: null, seq: -1, disconnectedAt: null };
           room.sessions.set(session.token, session);

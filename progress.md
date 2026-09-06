@@ -1,5 +1,10 @@
 Original prompt: I’m not liking what we have. For now make me my own copy of this Celestefall on GitHub And get it running in place of what we have.
 
+## 2026-09-05 — Truthful room-full and disconnect state
+
+- Rejection responses now include the authoritative room occupancy when available. The browser preserves `null` for unknown occupancy after disconnect/rejection, clears stale remotes/effects, and only renders `ROOM FULL · N/8` for a verified bounded count; legacy responses render `ROOM FULL` without inventing `8/8`.
+- Authority network tests and the headless desktop/mobile browser test pass, including reconnect cleanup, exact full-room occupancy, and no client-side shared simulation.
+
 ## 2026-09-05 — Coordinated 1.1 authoritative gameplay integration
 
 - Replaced peer Supabase gameplay broadcasts with a dedicated Node/WebSocket authority. Server simulates all players, AI, projectiles, damage/death/respawn, moving platforms, captures and pickups at 60Hz; clients send controls at30Hz and render complete15Hz snapshots. Shared simulation remains disabled in clients during disconnect/rejection. Server assigns IDs/resume tokens, admits8 without evicting existing members, expires stale inputs and clears disconnected/rejected UI/remotes.
@@ -115,3 +120,6 @@ Original prompt: I’m not liking what we have. For now make me my own copy of t
 - Offline death branches and server authority use same helper; dead bats simulate offscreen. Renderer preserves death pose, aligning visible bounds with landing feet.
 - Validation: 6 node corpse regressions including actual server snapshot/lifetime pass; tests/bat-corpse-headless.mjs verifies offscreen fall, ledge landing, death animation, respawn and zero page errors. Screenshots inspected in output/bat-corpse. Skill headless movement smoke passes.
 - Publishing delegated to server-sync task for combined v1.1; no independent push.
+
+- Publication completed: game commit 0661fa5 built at https://ijustcreate.github.io/bcd-kc-encore/ and the compatible old /Celestefall/ path; BCD launcher commit a0511be built live. Headless public BCD iframe check passed canonical URL, displayed v1.1, fresh Reload, close cleanup, OFFLINE PRACTICE and zero page errors; embedded screenshot inspected (output/live-release-1.1).
+- Remaining: public authoritative hosting choice/account required; no paid resources created. Dedicated server is locally verified but not publicly hosted. Physical phone FPS remains for diagnostics task. User reports missing fill during actual offline red-to-green recapture; capture task reopened to reproduce. Diagnostics and capture tasks coordinate next 1.2; they own current new shared-file edits. Preserve separate unpublished WebGL2 work and unrelated BCD prototype/polling changes.
