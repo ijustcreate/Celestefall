@@ -1,0 +1,6 @@
+.git
+output
+**/node_modules
+**/.env
+docs/assets
+docs/vendor

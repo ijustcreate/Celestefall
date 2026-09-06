@@ -1,88 +1,115 @@
 (() => {
   'use strict';
-
-  const MAX_PLAYERS = 8;
-
+  const PROTOCOL = 1;
+  // Only the configured server can own a room. A lost connection never elects
+  // a browser host or resumes local simulation of the shared world.
   class EncoreRoom extends EventTarget {
     constructor(config, player) {
       super();
-      this.config = config || {};
-      this.player = player;
-      this.client = null;
-      this.channel = null;
-      this.connected = false;
-      this.lastStateAt = 0;
-      this.members = new Map();
+      this.config = config || {}; this.player = player;
+      this.connected = false; this.authoritative = Boolean(this.config.serverUrl);
+      this.members = new Map(); this.socket = null; this.stopped = false;
+      this.seq = 0; this.tick = -1; this.epoch = null; this.retry = 0; this.lastSnapshotAt = 0;
+      this.storageKey = `encore-resume:${this.config.serverUrl}:${this.config.roomId || 'royal'}:${player.id}`;
+      try { this.resumeToken = sessionStorage.getItem(this.storageKey); } catch { this.resumeToken = null; }
     }
-
+    emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
+    clearMembers(reason) {
+      this.connected = false;
+      for (const id of this.members.keys()) if (id !== this.player.id) this.emit('leave', { id });
+      this.members.clear();
+      this.emit('presence', { count: 0, connected: false, full: reason === 'room_full' });
+      this.emit('status', { connected: false, reason });
+    }
+    setInputSource(source) { this.inputSource = source; }
     async connect() {
-      if (!this.config.url || !this.config.key || !window.supabase?.createClient) {
-        this.dispatchEvent(new CustomEvent('status', { detail: { connected: false, reason: 'offline' } }));
-        return false;
-      }
-      this.client = window.supabase.createClient(this.config.url, this.config.key, { auth: { persistSession: false } });
-      const room = `bcdkc-encore-${String(this.config.roomId || 'royal').replace(/[^a-z0-9_-]/gi, '-').slice(0, 60)}`;
-      this.channel = this.client.channel(room, { config: { presence: { key: this.player.id } } });
-      this.channel
-        .on('presence', { event: 'sync' }, () => this.syncPresence())
-        .on('broadcast', { event: 'state' }, ({ payload }) => this.dispatchEvent(new CustomEvent('state', { detail: payload })))
-        .on('broadcast', { event: 'hit' }, ({ payload }) => this.dispatchEvent(new CustomEvent('hit', { detail: payload })))
-        .on('broadcast', { event: 'eliminated' }, ({ payload }) => this.dispatchEvent(new CustomEvent('eliminated', { detail: payload })))
-        .on('broadcast', { event: 'capture' }, ({ payload }) => this.dispatchEvent(new CustomEvent('capture', { detail: payload })))
-        .subscribe(status => {
-          this.connected = status === 'SUBSCRIBED';
-          if (this.connected) this.track();
-          this.dispatchEvent(new CustomEvent('status', { detail: { connected: this.connected, reason: status } }));
-        });
+      if (this.stopped || this.socket) return false;
+      if (!this.authoritative) { this.clearMembers('offline'); return false; }
+      let url;
+      try {
+        url = new URL(this.config.serverUrl);
+        const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(url.hostname);
+        if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && local && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname))) throw Error('Secure server URL required');
+      } catch { this.clearMembers('invalid_server'); return false; }
+      if (!this.pump) this.pump = setInterval(() => {
+        const controls = this.inputSource?.();
+        if (this.connected && controls) this.publishInput(controls);
+        if (this.connected && performance.now() - this.lastSnapshotAt > 2000) {
+          this.clearMembers('reconnecting'); this.socket?.close(4009, 'snapshot_timeout');
+        }
+      }, 1000 / 30);
+      this.emit('status', { connected: false, reason: 'connecting' });
+      const socket = new WebSocket(url.href); this.socket = socket;
+      let terminal = false;
+      this.connectTimeout = setTimeout(() => socket.close(4009, 'connect_timeout'), 6000);
+      socket.addEventListener('open', () => {
+        if (this.stopped || this.socket !== socket) return;
+        socket.send(JSON.stringify({ type: 'join', protocol: PROTOCOL, room: this.config.roomId || 'royal', resumeToken: this.resumeToken, profile: this.player }));
+      });
+      socket.addEventListener('message', event => {
+        if (this.stopped || this.socket !== socket) return;
+        let msg; try { msg = JSON.parse(event.data); } catch { return; }
+        if (msg.type === 'rejected') {
+          terminal = true; this.clearMembers(msg.reason);
+          if (msg.reason === 'room_full' || msg.reason === 'server_full') this.emit('full', { reason: msg.reason });
+          return;
+        }
+        if (msg.type === 'welcome') {
+          if (msg.protocol !== PROTOCOL) { terminal = true; socket.close(); this.clearMembers('version_mismatch'); return; }
+          this.player.id = msg.id; this.resumeToken = msg.resumeToken;
+          try { sessionStorage.setItem(this.storageKey, this.resumeToken); } catch {}
+          this.epoch = msg.epoch; this.tick = -1; this.seq = 0;
+          this.emit('welcome', msg); return;
+        }
+        if (msg.type !== 'snapshot' || msg.protocol !== PROTOCOL || msg.epoch !== this.epoch || !Number.isSafeInteger(msg.tick) || msg.tick <= this.tick || !Array.isArray(msg.players)) return;
+        if (!msg.players.some(p => p.id === this.player.id)) return;
+        clearTimeout(this.connectTimeout);
+        this.tick = msg.tick; this.lastSnapshotAt = performance.now(); this.retry = 0;
+        const wasConnected = this.connected; this.connected = true;
+        const next = new Map(msg.players.map(p => [p.id, p]));
+        for (const [id, member] of next) if (id !== this.player.id && !this.members.has(id)) this.emit('join', member);
+        for (const id of this.members.keys()) if (id !== this.player.id && !next.has(id)) this.emit('leave', { id });
+        this.members = next; this.emit('snapshot', msg);
+        this.emit('presence', { count: next.size, connected: true, full: false });
+        if (!wasConnected) this.emit('status', { connected: true, reason: 'live' });
+      });
+      socket.addEventListener('error', () => {});
+      socket.addEventListener('close', event => {
+        if (this.socket !== socket) return;
+        clearTimeout(this.connectTimeout); this.socket = null;
+        if (this.stopped) return;
+        if (event.code === 4001) { terminal = true; this.clearMembers('session_replaced'); }
+        if (terminal) { clearInterval(this.pump); this.pump = null; return; }
+        this.clearMembers('reconnecting');
+        const delay = Math.min(5000, 300 * 2 ** Math.min(this.retry++, 4));
+        this.retryTimer = setTimeout(() => this.connect(), delay);
+      });
       return true;
     }
-
-    async track() {
-      if (!this.channel) return;
-      await this.channel.track({ ...this.player, joinedAt: Date.now() });
+    publishInput(input) {
+      if (!this.connected || this.socket?.readyState !== WebSocket.OPEN || this.socket.bufferedAmount > 8192) return;
+      this.socket.send(JSON.stringify({ type: 'input', seq: this.seq++, input }));
     }
-
-    syncPresence() {
-      const state = this.channel?.presenceState?.() || {};
-      const next = new Map();
-      Object.entries(state).forEach(([id, entries]) => {
-        const member = entries?.[0];
-        if (member?.id) next.set(id, member);
-      });
-      const ids = [...next.keys()].sort();
-      const accepted = new Set(ids.slice(0, MAX_PLAYERS));
-      const wasHere = new Set(this.members.keys());
-      this.members = new Map([...next].filter(([id]) => accepted.has(id)));
-      for (const [id, member] of this.members) {
-        if (id !== this.player.id && !wasHere.has(id)) this.dispatchEvent(new CustomEvent('join', { detail: member }));
-      }
-      for (const id of wasHere) {
-        if (id !== this.player.id && !this.members.has(id)) this.dispatchEvent(new CustomEvent('leave', { detail: { id } }));
-      }
-      this.dispatchEvent(new CustomEvent('presence', { detail: { count: this.members.size, full: !accepted.has(this.player.id) } }));
-      if (!accepted.has(this.player.id)) this.dispatchEvent(new CustomEvent('full'));
+    track() {
+      if (this.connected && this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify({ type: 'profile', profile: this.player }));
     }
-
-    publishState(state) {
-      const now = performance.now();
-      if (!this.connected || !this.channel || now - this.lastStateAt < 80) return;
-      this.lastStateAt = now;
-      this.channel.send({ type: 'broadcast', event: 'state', payload: { id: this.player.id, ...state } });
-    }
-
-    send(event, payload) {
-      if (this.connected && this.channel) this.channel.send({ type: 'broadcast', event, payload });
-    }
-
+    // Legacy callers cannot publish authoritative state or outcomes.
+    publishState() {}
+    send() {}
     async leave() {
-      this.connected = false;
-      const client = this.client;
-      this.channel = null;
-      this.client = null;
-      try { await client?.removeAllChannels(); }
-      finally { client?.realtime.disconnect(); }
+      this.stopped = true;
+      clearInterval(this.pump); clearTimeout(this.retryTimer); clearTimeout(this.connectTimeout); this.pump = null;
+      const socket = this.socket; this.socket = null; this.clearMembers('left');
+      try { sessionStorage.removeItem(this.storageKey); } catch {}
+      this.resumeToken = null;
+      if (!socket || socket.readyState === WebSocket.CLOSED) return;
+      await new Promise(resolve => {
+        const timeout = setTimeout(resolve, 800);
+        socket.addEventListener('close', () => { clearTimeout(timeout); resolve(); }, { once: true });
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'leave' }));
+        socket.close(1000, 'left');
+      });
     }
   }
-
   window.EncoreRoom = EncoreRoom;
 })();

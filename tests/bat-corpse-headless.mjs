@@ -1,0 +1,43 @@
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const require = createRequire('C:/Users/17148/.codex/skills/develop-web-game/package.json');
+const { chromium } = require('playwright');
+const browser = await chromium.launch({headless:true});
+try {
+  const page = await browser.newPage({viewport:{width:1280,height:800}});
+  const errors=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await page.addInitScript(() => { window.requestAnimationFrame = () => 1; });
+  await page.goto(process.argv[2] || 'http://127.0.0.1:4197/?admin=1');
+  await page.waitForFunction(()=>window.__celestefallTest && window.CelestefallCorpsePhysics);
+  await page.waitForTimeout(1800);
+  const result = await page.evaluate(() => {
+    const state = () => JSON.parse(window.render_game_to_text());
+    const bat = () => state().creatures.find(c=>c.id==='bat-west');
+    window.__celestefallTest.setPlayerPosition(100,328);
+    window.__celestefallTest.damageCreature('bat-west');
+    const dead = bat();
+    window.advanceTime(10*1000/60);
+    const falling = bat();
+    window.advanceTime(25*1000/60);
+    const settled = bat();
+    window.__celestefallTest.setPlayerPosition(450,328);
+    window.advanceTime(1000/60);
+    return {dead,falling,settled};
+  });
+  assert.equal(result.dead.alive,false);
+  assert.ok(result.falling.y > result.dead.y);
+  assert.equal(result.falling.respawnTimer,120);
+  assert.equal(result.falling.animation,'death');
+  assert.equal(result.settled.y,292);
+  assert.equal(result.settled.alive,false);
+  fs.mkdirSync('output/bat-corpse',{recursive:true});
+  await page.screenshot({path:'output/bat-corpse/settled.png'});
+  await page.evaluate(()=>window.advanceTime(130*1000/60));
+  const respawned=await page.evaluate(()=>JSON.parse(render_game_to_text()).creatures.find(c=>c.id==='bat-west'));
+  assert.equal(respawned.alive,true);
+  assert.deepEqual(errors,[]);
+  fs.writeFileSync('output/bat-corpse/lifecycle.json',JSON.stringify({result,respawned,errors},null,2));
+  console.log('PASS: offscreen fall, visible death, first ledge, frozen air timer, respawn, no page errors');
+} finally { await browser.close(); }

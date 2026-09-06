@@ -1,5 +1,13 @@
 Original prompt: I’m not liking what we have. For now make me my own copy of this Celestefall on GitHub And get it running in place of what we have.
 
+## 2026-09-05 — Coordinated 1.1 authoritative gameplay integration
+
+- Replaced peer Supabase gameplay broadcasts with a dedicated Node/WebSocket authority. Server simulates all players, AI, projectiles, damage/death/respawn, moving platforms, captures and pickups at 60Hz; clients send controls at30Hz and render complete15Hz snapshots. Shared simulation remains disabled in clients during disconnect/rejection. Server assigns IDs/resume tokens, admits8 without evicting existing members, expires stale inputs and clears disconnected/rejected UI/remotes.
+- Integrated scoped respawn, corpse, heart, capture marker/fill, account-name and health-dot tasks. Hearts roll once on server lethal transitions, heal one actual health point for one winner, and disappear in every snapshot. Helpers also support clearly labeled single-player practice. Preserved v1.0 reload/asset freshness/shutdown and6b0bfe6 idle-head correction; separate WebGL2 checkout untouched.
+- Verification:9 authority network/respawn tests and9 heart/corpse tests pass; real headless desktop/mobile browser test passes shared bot/slug/hearts, keyboard combat, late join, single pickup, reconnect, eight-slot rejection/cleanup and inability of browser time to advance shared simulation. Account-name, capture marker, bat corpse and idle-head regressions pass; standard web-game client smoke and screenshots inspected. An account-name test timed out during concurrent browser runs, then passed alone; bat test initially omitted its required admin=1 URL, corrected run passed.
+- Eight-player sample:6,451-byte JSON snapshot compressed to916 bytes.10,000 local server ticks measured162.6ms in one smoke sample (not production/physical-phone certification). No extra client AI simulation added. Original physical-phone1FPS issue is not certified resolved.
+- Public hosting remains a deployment requirement: verified existing Supabase project has only profile/achievement/chat Edge Functions; GitHub Pages cannot run this persistent process. No paid resources created. Added server/README.md and Dockerfile. Empty authority-config.js explicitly selects OFFLINE PRACTICE, never falsely LIVE. New bcd-kc-encore repository created for canonical URL, preserving old Celestefall link; release/public verification still pending below.
+
 ## 2026-09-03 — Encore Royale combat and color-team pass
 
 - Replaced the bat's overly narrow dive collision with a matching radius-based impact check, so a visible dive now reliably lands one hit.
@@ -67,3 +75,43 @@ Original prompt: I’m not liking what we have. For now make me my own copy of t
 - Shared immutable Spine source assets (`.json`, `.atlas`, decoded `.png`) across rigs while retaining a separate atlas/SkeletonData per character, which preserves chroma and attachment isolation. Ash, one shared Player2 source for selectable/bot rigs, Bat, and Slug now report four source-cache entries instead of decoding Player2’s 2048×2048 (16 MiB decoded) atlas for each rig.
 - Local Chromium evidence: readiness-gated 60-Hz portrait/landscape runs completed in 621–729 ms standalone/iframe startup with zero browser errors; 5-second p95 was 16.7–16.8 ms. The target-120 profiles correctly report the host’s observed ~59–60 Hz cadence, so they are regression coverage only and cannot certify a physical 120-Hz display. The full three-screen route ended with live Ash, Player2, bat, and slug rigs and zero browser errors; visual screenshot inspection passed.
 - TODO: record three consecutive runs on representative 60-Hz and 120-Hz Android/iOS phones (including Safari) to validate thermal behavior, real refresh cadence, and post-warmup heap settling before release.
+
+## 2026-09-05 — Player Two idle blink head correction
+
+- Reproduced the idle pop with the shipped Spine runtime: the Heads slot switches to ash_head_17 at 0.5s and back to ash_head_02 at 0.6667s. Player2's blink attachment was 246x230 versus the normal head's 226x219, with a different center/rotation. Ash's corresponding attachments already have matching dimensions. HeadFacing scale stayed constant and its position remained continuous; there is no erroneous head-scale keyframe or blend spike to remove.
+- Corrected only the Player2 blink attachment's width, height, x/y, and rotation to match its open-eye attachment. Preserved the blink texture, slot keys, all bone curves, idle breathing, and the runtime's 90ms blend. A semantic comparison against HEAD confirmed every other rig value is unchanged.
+- Added tests/idle-head.mjs: headless Chromium loads both real rigs, samples 1,200 frames (ten idle loops at 120 Hz), captures before/during/after-blink frames, and exercises ten action-to-idle transitions per rig. Assertions require both blink images, moving idle pose, continuous head position, stable head dimensions, finite transition poses, and no page errors. The original attachment showed about 1.72 and 0.946 game-pixel dimension jumps; corrected head dimensions vary only by floating-point noise (under 0.00003 pixels including settled transitions).
+- Verification passed: node tests/idle-head.mjs http://127.0.0.1:4193/ output/idle-head-after; standard develop-web-game client with tests/three-screen.actions.json. Inspected the rig contact sheet and gameplay screenshot; no browser errors. Evidence in output/idle-head-before, output/idle-head-after, output/idle-head-gameplay (ignored local artifacts).
+- Local fix only; not committed, pushed, or published. The separate Celestefall-renderer-wgl2 checkout is untouched and must receive this asset correction when its renderer work is integrated. No further local TODO for this defect.
+- Publication follow-up: user authorized live release. Confirmed FPS task completed/inactive and GitHub Pages serves main/docs. Committed only Player2.json and tests/idle-head.mjs as 6b0bfe6, pushed main, and confirmed GitHub Pages built that exact commit. Fetched the public JSON and verified corrected blink metadata. Headless tests/idle-head.mjs against https://ijustcreate.github.io/Celestefall/ passed all idle/transition assertions with zero page errors; live contact sheet inspected. Renderer/performance checkout untouched. Local progress.md remains uncommitted.
+
+## 2026-09-05 — Shared heart drop helper
+- Added server/heart-drops.mjs: 50% bat/slug drop threshold, server-only falling pickups, +1 capped health, one collector, full/dead/disconnected skip, 30s expiry.
+- Added drawHearts renderer (reapplied after concurrent file restoration). No player death drops or local random rolls.
+- Three helper tests pass and game.js syntax passes. Headless smoke captured output/hearts-smoke; combined two-client/late-join validation and publishing owned by server synchronization task.
+
+## 2026-09-05 — Capture markers rest on crown platforms
+
+- Added CAPTURE_MARKER_Y from authored crown ledge geometry; fill task integrated it in drawCaptureZones for all visual elements. Marker tops are 118/82/118 and bottoms 180/144/180 (50px higher). Capture zone geometry and behavior are unchanged.
+- Headless output/check-markers.mjs passed exact canvas outline placement for all three markers, unchanged gameplay Y assertions, and zero page errors. Inspected all three screenshots and standard web-game client gameplay screenshot/state (output/marker-gameplay).
+- Coordinated shared draw function with fill task and publication with server/reload tasks; no independent commit or push. Ready for coordinated release.
+`n- 2026-09-05 health-dot visual: removed only the local player shared gray 26x7 backing in drawPlayer. All three floating dots still render at full health; partial health retains gray empty dots. Headless standard client and instrumented full (3/3) / partial (2/3) canvas checks passed, screenshots inspected, zero browser errors. Artifacts: output/health-dots-qa; no independent commit/push.
+
+## 2026-09-05 — BCD account display-name handoff
+- Launcher sends normalized currentUser().name on iframe load and ready, with exact target origin, and refreshes changed account display metadata while open. No credentials passed.
+- Game refreshes existing room profile through track() on repeat identity messages; no competing connection or authority changes.
+- tests/account-name.mjs passed with real launcher + iframe: Felix, another account/rename, guest fallback, rejected non-parent sender, zero page errors. Standard headless movement smoke passed; screenshot inspected.
+- v1.1 coordinated release owner handles publishing and live two-client authoritative snapshot validation; this task made no pushes.
+
+
+## 2026-09-05 — Capture marker color fill
+- Marker interior now fills bottom-to-top in each capturing team's color, proportional to authoritative progress. Existing owner color stays on the border and owner names remain until completion; recapture percentage is visible for different players and same-user color changes. Multiple colors retain separate progress lanes during contest, labeled CONTESTED.
+- Reads server snapshot captureProgressByColor / captureContested supplied by authority task, with offline local-progress fallback. Text-state output exposes per-color percentages and contest state. Integrated placement task's CAPTURE_MARKER_Y for every marker visual coordinate; gameplay bounds unchanged.
+- Headless tests/capture-marker.mjs passed fill heights at 25/50/75%, fixed bottom, remote color, same-ID changed color, owner retention, contest lanes, and completed recapture. Scenario screenshot inspected. Standard develop-web-game three-screen client passed with no page-error artifact; gameplay screenshot/state inspected. Syntax and git diff --check passed.
+- No independent commit/push: release task owns combined version/publishing. Authority task owns end-to-end server capture tests. Recovered first edit's Windows encoding failure from committed f0404d4 and coordinated reapplication of concurrent heart rendering; further edits used narrow apply_patch.
+
+## 2026-09-05 — Bat corpse landing
+- Shared deterministic docs/corpse-physics.js + server/corpse-physics.mjs: dead bats fall under gravity, swept first-surface landing prevents tunneling, settled bodies follow moving supports. Bat lifetime starts counting down on landing; player death untouched.
+- Offline death branches and server authority use same helper; dead bats simulate offscreen. Renderer preserves death pose, aligning visible bounds with landing feet.
+- Validation: 6 node corpse regressions including actual server snapshot/lifetime pass; tests/bat-corpse-headless.mjs verifies offscreen fall, ledge landing, death animation, respawn and zero page errors. Screenshots inspected in output/bat-corpse. Skill headless movement smoke passes.
+- Publishing delegated to server-sync task for combined v1.1; no independent push.

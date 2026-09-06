@@ -128,10 +128,13 @@
     (async () => {
       for (const source of [
         'vendor/spine-3.7/spine-canvas.js?v=3.7.94',
-        'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js',
-        'ash-character.js?v=20260905-reload1',
-        'room-client.js?v=20260905-reload1',
-        'game.js?v=20260905-reload1'
+        'authority-config.js?v=1.1',
+        'spawn-selector.js?v=1.1',
+        'corpse-physics.js?v=1.1',
+        'heart-drops.js?v=1.1',
+        'ash-character.js?v=1.1',
+        'room-client.js?v=1.1',
+        'game.js?v=1.1'
       ]) {
         await new Promise((resolve, reject) => {
           const script = document.createElement('script');
@@ -142,7 +145,7 @@
         });
       }
     })().catch(() => {
-      document.getElementById('roomStatus').textContent = 'LOAD FAILED · RETRY RELOAD';
+      document.getElementById('roomStatus').textContent = 'LOAD FAILED Â· RETRY RELOAD';
     });
   </script>
 </body>

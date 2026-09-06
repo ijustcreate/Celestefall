@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_VERSION = '1.0';
+  const BUILD_VERSION = '1.1';
   let disposed = false;
   let animationFrame = 0;
 
@@ -237,6 +237,10 @@
     { id: 'opera', x: 924, y: 132, w: 74, h: 62, label: 'OPERA' },
     { id: 'crystal', x: 1610, y: 168, w: 74, h: 62, label: 'CRYSTAL' }
   ];
+  // Render markers on the crown surfaces without changing gameplay capture bounds.
+  const CAPTURE_MARKER_Y = new Map(CAPTURE_ZONES.map(zone => [
+    zone.id, ledges.find(platform => platform.id === `${zone.id}-crown`).y - zone.h
+  ]));
   const game = {
     mode: 'playing',
     time: 0,
@@ -462,6 +466,8 @@
       health: spec.health,
       maxHealth: spec.health,
       alive: true,
+      grounded: false,
+      corpseSupportId: null,
       respawnTimer: 0,
       hitTimer: 0,
       attackTimer: 0,
@@ -473,6 +479,7 @@
     };
   }
 
+  let offlineHeartDrops;
   function resetGame(countDeath = false) {
     if (countDeath) game.deaths += 1;
     game.player = freshPlayer();
@@ -484,6 +491,8 @@
     game.particles.length = 0;
     game.projectiles.length = 0;
     game.respawnBursts.length = 0;
+    offlineHeartDrops = window.EncoreHeartDrops?.createHeartDrops();
+    game.hearts = [];
     input.jumpPressed = false;
     input.jumpHeld = false;
     input.shootHeld = false;
@@ -781,7 +790,9 @@
   }
 
   function respawnPlayer() {
+    const spawn = window.EncoreSpawn?.chooseRespawn?.({ world: WORLD, fixed, ledges, movers: game.movers, player: game.player, actors: [game.bot, ...game.creatures], projectiles: game.projectiles });
     game.player = freshPlayer();
+    if (spawn) Object.assign(game.player, spawn);
     game.player.invulnerable = 90;
     game.player.respawnPulse = 32;
     emitRespawnBurst(game.player.x, game.player.y, game.loadout.color);
@@ -810,6 +821,7 @@
       creature.alive = false;
       creature.respawnTimer = 120;
       game.creatureKills += 1;
+      offlineHeartDrops?.drop(creature);
     }
     return true;
   }
@@ -851,7 +863,10 @@
 
   function updateCreature(creature) {
     if (!creature.alive) {
-      creature.respawnTimer -= 1;
+      if (creature.type === 'bat') {
+        window.CelestefallCorpsePhysics.stepBatCorpse(creature, fixed.concat(ledges, game.movers));
+      }
+      if (creature.type !== 'bat' || creature.grounded) creature.respawnTimer -= 1;
       creature.animation = 'death';
       if (creature.respawnTimer <= 0) respawnCreature(creature);
       return;
@@ -934,7 +949,7 @@
   }
 
   function creatureNeedsFullSimulation(creature) {
-    return creature.hitTimer > 0 || creature.attackTimer > 0 || Math.abs(game.player.x - creature.x) <= AI_FULL_SIMULATION_RADIUS;
+    return (!creature.alive && creature.type === 'bat') || creature.hitTimer > 0 || creature.attackTimer > 0 || Math.abs(game.player.x - creature.x) <= AI_FULL_SIMULATION_RADIUS;
   }
 
   function updateBackgroundCreature(creature) {
@@ -1247,36 +1262,105 @@
     game.room.publishState({ x: p.x, y: p.y, facing: p.facing, animation: p.animation, health: p.health, name: game.playerName, character: game.loadout.character, color: game.loadout.color, alive: p.alive, respawnTimer: p.respawnTimer });
   }
 
+  let authorityEpoch = null;
+  let lastAuthorityEvent = null;
+
+  function applyAuthoritySnapshot(snapshot) {
+    const local = snapshot.players.find(player => player.id === game.room.player.id);
+    if (!local) return;
+    if (snapshot.epoch !== authorityEpoch) {
+      authorityEpoch = snapshot.epoch;
+      lastAuthorityEvent = null;
+      game.particles.length = 0;
+      game.respawnBursts.length = 0;
+    }
+    // Positions, damage, deaths, scores, projectiles and pickups are all
+    // hydrated from the same server tick. Rendering cannot mutate outcomes.
+    Object.assign(game.player, local);
+    game.playerName = local.name;
+    game.bot = { ...snapshot.bot };
+    game.creatures = snapshot.creatures.map(creature => ({ ...creature }));
+    game.projectiles = snapshot.projectiles.map(note => ({ ...note }));
+    game.movers = snapshot.movers.map(mover => ({ ...mover }));
+    game.hearts = (snapshot.hearts || []).map(heart => ({ ...heart }));
+    game.time = snapshot.time;
+    game.frame = snapshot.tick;
+    game.kills = local.kills;
+    game.deaths = local.deaths;
+    game.creatureKills = local.creatureKills;
+    game.capturedZones = new Map(snapshot.captures.map(capture => [capture.id, capture]));
+    game.captureProgressByColor = new Map(snapshot.captureProgress.map(progress => [progress.id, progress.colors]));
+    game.captureContested = new Set(snapshot.captureContested || []);
+    game.captureProgress = new Map(snapshot.captureProgress.map(progress => [progress.id, progress.colors[local.color] || 0]));
+    const currentIds = new Set(snapshot.players.map(player => player.id));
+    for (const id of game.remotePlayers.keys()) if (!currentIds.has(id)) removeRemote(id);
+    for (const player of snapshot.players) if (player.id !== local.id) upsertRemote(player);
+    const events = snapshot.events || [];
+    if (lastAuthorityEvent !== null) {
+      for (const event of events) {
+        if (event.id <= lastAuthorityEvent) continue;
+        if (event.type === 'respawn') emitRespawnBurst(event.x, event.y, event.color);
+        if (['hit', 'death', 'heal'].includes(event.type)) emitDust(event.x, event.y - 16, event.type === 'death' ? 16 : 7);
+        if (event.targetId === local.id && event.type === 'hit') vibrate(16);
+        if (event.type === 'death' && event.attackerId === local.id && snapshot.players.some(p => p.id === event.targetId)) emitGameEvent('first_pk', { victimId: event.targetId });
+        if (event.type === 'capture' && event.contributors?.some(p => p.id === local.id)) emitGameEvent('capture_point', { zone: event.zoneId });
+      }
+    }
+    if (events.length) lastAuthorityEvent = Math.max(lastAuthorityEvent || 0, ...events.map(event => event.id));
+    else lastAuthorityEvent ??= 0;
+  }
+
   function connectRoom(config) {
     if (!window.EncoreRoom || game.room) return;
-    const id = String(config.playerId || `guest-${crypto.randomUUID?.() || Date.now()}`);
-    game.room = new window.EncoreRoom({ url: config.realtimeUrl, key: config.realtimeKey, roomId: config.roomId || 'royal' }, { id, name: game.playerName, character: game.loadout.character, color: game.loadout.color });
-    game.room.addEventListener('status', event => setRoomStatus(event.detail.connected ? 'LIVE ROOM' : 'OFFLINE PRACTICE', event.detail.connected));
-    game.room.addEventListener('presence', event => { game.roomCount = event.detail.count; setRoomStatus(event.detail.count > 1 ? `LIVE · ${event.detail.count}/8` : 'LIVE · WAITING', true); });
-    game.room.addEventListener('join', event => { const member = event.detail; emitDust(game.player.x, game.player.y - 28, 10); upsertRemote({ ...member, x: SPAWN.x, y: SPAWN.y, facing: 1, animation: 'idle', health: 3 }); });
-    game.room.addEventListener('leave', event => removeRemote(event.detail?.id));
-    game.room.addEventListener('state', event => {
-      const remote = event.detail;
-      if (!remote?.id || remote.id === game.room.player.id) return;
-      upsertRemote(remote);
+    let guestId;
+    try {
+      guestId = sessionStorage.getItem('encore-guest-id');
+      if (!guestId) { guestId = `guest-${crypto.randomUUID()}`; sessionStorage.setItem('encore-guest-id', guestId); }
+    } catch { guestId = `guest-${crypto.randomUUID()}`; }
+    const id = String(config.playerId || guestId);
+    const serverUrl = config.serverUrl || window.ENCORE_SERVER_URL || '';
+    game.room = new window.EncoreRoom({ serverUrl, roomId: config.roomId || 'royal' }, { id, name: game.playerName, character: game.loadout.character, color: game.loadout.color });
+    game.room.setInputSource(() => {
+      const controls = { ...input };
+      input.jumpPressed = input.shootReleased = input.meleePressed = input.dashPressed = false;
+      return controls;
     });
-    game.room.addEventListener('hit', event => {
-      const hit = event.detail;
-      // Roster color is the team key, so friendly fire cannot turn a shared
-      // capture team into an accidental deathmatch.
-      if (hit?.targetId === game.room.player.id && hit.attackerColor !== game.loadout.color) {
-        game.lastAttacker = hit.attackerId;
-        hitPlayer(hit.x || 0, hit.y || -2);
+    game.room.addEventListener('status', event => {
+      const { connected, reason } = event.detail;
+      const labels = { offline: 'OFFLINE PRACTICE', connecting: 'CONNECTING', reconnecting: 'RECONNECTING · PAUSED', room_full: 'ROOM FULL · 8/8', server_full: 'SERVER FULL', invalid_server: 'SERVER UNAVAILABLE', session_replaced: 'SESSION OPEN ELSEWHERE', version_mismatch: 'RELOAD REQUIRED', left: 'DISCONNECTED' };
+      setRoomStatus(connected ? `LIVE · ${game.roomCount}/8` : labels[reason] || 'SERVER UNAVAILABLE', connected);
+      if (!connected) {
+        game.roomCount = 0;
+        for (const id of [...game.remotePlayers.keys()]) removeRemote(id);
+        if (game.room.authoritative) { game.projectiles.length = 0; game.hearts = []; }
       }
     });
-    game.room.addEventListener('eliminated', event => { const result = event.detail; if (result?.killerId === game.room.player.id) { game.kills += 1; emitGameEvent('first_pk', { victimId: result.victimId }); } });
-    game.room.addEventListener('capture', event => { const captured = event.detail; if (captured?.id) game.capturedZones.set(captured.id, captured); });
-    game.room.addEventListener('full', () => { game.room.leave(); setRoomStatus('ROOM FULL · 8/8'); });
+    game.room.addEventListener('presence', event => {
+      game.roomCount = event.detail.count;
+      if (event.detail.connected) setRoomStatus(`LIVE · ${event.detail.count}/8`, true);
+    });
+    game.room.addEventListener('snapshot', event => applyAuthoritySnapshot(event.detail));
+    game.room.addEventListener('leave', event => removeRemote(event.detail?.id));
     game.room.connect();
+  }
+
+  function updateOfflineHearts() {
+    if (!offlineHeartDrops) return;
+    game.player.connected = true;
+    offlineHeartDrops.update({ players: [game.player], surfaces: [...fixed, ...ledges, ...game.movers], emit: (_type, event) => emitDust(event.x, event.y, 7) });
+    game.hearts = offlineHeartDrops.snapshot();
   }
 
   function update() {
     if (game.mode !== 'playing') return;
+    if (game.room?.authoritative) {
+      // Shared simulation runs only on the server. This remains true during
+      // reconnect/full-room rejection, so no private replacement world forms.
+      game.cloudX = (game.cloudX + .25) % 448;
+      updateParticles();
+      updateCamera();
+      return;
+    }
     const p = game.player;
     const wasGrounded = p.grounded;
     game.time += STEP;
@@ -1294,6 +1378,7 @@
     p.respawnPulse = Math.max(0, p.respawnPulse - 1);
 
     movePlatforms();
+    updateOfflineHearts();
 
     if (!p.alive) {
       p.respawnTimer = Math.max(0, p.respawnTimer - 1);
@@ -1618,24 +1703,56 @@
 
   function drawCaptureZones() {
     for (const zone of CAPTURE_ZONES) {
-      const x = Math.round(zone.x - game.camera.x), progress = (game.captureProgress.get(zone.id) || 0) / CAPTURE_FRAMES, captured = game.capturedZones.get(zone.id);
+      const x = Math.round(zone.x - game.camera.x), y = CAPTURE_MARKER_Y.get(zone.id) - game.camera.y;
       if (x + zone.w < 0 || x > canvas.width) continue;
-      ctx.fillStyle = captured?.color || 'rgba(240,194,88,.2)';
-      ctx.globalAlpha = captured ? .36 : .12 + progress * .18;
-      ctx.fillRect(x, zone.y, zone.w, zone.h);
+      const captured = game.capturedZones.get(zone.id);
+      // Use all server colors so remote progress never takes the viewer's color.
+      const colors = game.captureProgressByColor?.get(zone.id) ?? {
+        [game.loadout.color]: game.captureProgress.get(zone.id) || 0
+      };
+      const challengers = Object.entries(colors)
+        .filter(([color, frames]) => color !== captured?.color && Number.isFinite(frames) && frames > 0)
+        .sort(([a], [b]) => a.localeCompare(b));
+      const contested = game.captureContested?.has(zone.id) || false;
+      ctx.save();
+      ctx.fillStyle = captured?.color || '#e5bb58';
+      ctx.globalAlpha = captured ? .22 : .08;
+      ctx.fillRect(x, y, zone.w, zone.h);
+      // Preserve the owner border until capture completes. Multiple teams with
+      // remaining progress get equal-width lanes, each filled bottom-to-top.
+      const laneWidth = (zone.w - 4) / Math.max(1, challengers.length);
+      for (let index = 0; index < challengers.length; index += 1) {
+        const [color, frames] = challengers[index];
+        const height = (zone.h - 4) * Math.min(1, frames / CAPTURE_FRAMES);
+        const left = x + 2 + index * laneWidth, top = y + zone.h - 2 - height;
+        ctx.fillStyle = color; ctx.globalAlpha = .72;
+        ctx.fillRect(left, top, laneWidth, height);
+        ctx.globalAlpha = 1;
+        ctx.fillRect(left, top, laneWidth, Math.min(1, height));
+      }
       ctx.globalAlpha = 1;
       ctx.strokeStyle = captured?.color || '#e5bb58';
       ctx.setLineDash(captured ? [] : [3, 3]);
-      ctx.strokeRect(x + .5, zone.y + .5, zone.w - 1, zone.h - 1);
+      ctx.strokeRect(x + .5, y + .5, zone.w - 1, zone.h - 1);
       ctx.setLineDash([]);
-      ctx.fillStyle = '#ffe8a6'; ctx.font = 'bold 7px ui-monospace, monospace'; ctx.textAlign = 'center';
-      ctx.fillText(captured ? `${zone.label} ✓` : `${zone.label} ${Math.round(progress * 100)}%`, x + zone.w / 2, zone.y + 11);
+      ctx.textAlign = 'center'; ctx.font = 'bold 7px ui-monospace, monospace';
+      // Outline text instead of covering the fill, including its first few pixels.
+      ctx.strokeStyle = '#0c0a16'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+      ctx.fillStyle = '#fff6d5';
+      ctx.strokeText(zone.label, x + zone.w / 2, y + 10);
+      ctx.fillText(zone.label, x + zone.w / 2, y + 10);
+      const percent = Math.round(Math.max(0, ...challengers.map(([, frames]) => Math.min(1, frames / CAPTURE_FRAMES))) * 100);
+      const status = contested ? 'CONTESTED' : challengers.length ? `${percent}%` : captured ? '✓' : '0%';
+      ctx.strokeText(status, x + zone.w / 2, y + 20);
+      ctx.fillText(status, x + zone.w / 2, y + 20);
       if (captured?.contributors?.length) {
         const names = captured.contributors.map(member => member.name).join(' + ');
         const label = names.length > 15 ? `${names.slice(0, 14)}…` : names;
         ctx.fillStyle = '#fff6d5'; ctx.font = 'bold 6px ui-monospace, monospace';
-        ctx.fillText(label, x + zone.w / 2, zone.y + zone.h - 6);
+        ctx.strokeText(label, x + zone.w / 2, y + zone.h - 6);
+        ctx.fillText(label, x + zone.w / 2, y + zone.h - 6);
       }
+      ctx.restore();
     }
   }
 
@@ -1659,7 +1776,24 @@
     let labelled = 0;
     for (const remote of remotes) {
       const x = Math.round(remote.x - game.camera.x), y = Math.round(remote.y);
-      ctx.drawImage(remoteSprite(remote), x - 11, y - 36);
+      ctx.save();
+      if (remote.alive === false) ctx.globalAlpha = .3;
+      else if (remote.hitTimer > 0) ctx.globalAlpha = .65;
+      ctx.translate(x, y); ctx.scale(remote.facing || 1, 1);
+      ctx.drawImage(remoteSprite(remote), -11, -36);
+      ctx.restore();
+      if (remote.alive !== false && remote.meleeTimer > 0) {
+        const box = meleeHitbox(remote, remote.meleeDirection);
+        ctx.save(); ctx.strokeStyle = remote.color || '#ffffff'; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(box.x - game.camera.x, box.y + box.h);
+        ctx.quadraticCurveTo(box.x + box.w / 2 - game.camera.x, box.y - 8, box.x + box.w - game.camera.x, box.y + box.h / 2);
+        ctx.stroke(); ctx.restore();
+      }
+      for (let index = 0; index < (remote.maxHealth || 3); index++) {
+        ctx.fillStyle = index < remote.health ? remote.color : '#5d586c';
+        ctx.fillRect(x - 10 + index * 8, y - 41, 6, 3);
+      }
       if (labelled >= MAX_VISIBLE_REMOTE_LABELS) continue;
       labelled += 1;
       ctx.fillStyle = '#fff1c2'; ctx.font = 'bold 8px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText(remote.name || 'PLAYER', x, y - 47);
@@ -1704,8 +1838,6 @@
         ctx.drawImage(image, -image.width / 2, -image.height); ctx.restore();
       }
     }
-    ctx.fillStyle = '#363542';
-    ctx.fillRect(x - 13, y - 43, 26, 7);
     for (let index = 0; index < p.maxHealth; index += 1) {
       ctx.fillStyle = index < p.health ? game.loadout.color : '#5d586c';
       ctx.fillRect(x - 10 + index * 8, y - 41, 6, 3);
@@ -1742,14 +1874,28 @@
 
   function drawCreatures() {
     for (const creature of game.creatures) {
-      if (!creature.alive && creature.respawnTimer < 88) continue;
+      if (!creature.alive && creature.respawnTimer < 88 && (creature.type !== 'bat' || creature.grounded)) continue;
       const x = Math.round((creature.x - game.camera.x) * 2) / 2;
       const y = Math.round(creature.y - game.camera.y);
       if (x < -70 || x > canvas.width + 70) continue;
       const rig = creatureRigs.get(creature.id);
       if (rig?.ready) {
         prepareRigForRender(rig, creature.animation, CREATURE_RIG_UPDATE_INTERVAL);
-        rig.draw(x, y, creature.type === 'bat' ? -creature.facing : creature.facing, 1, 1);
+        let drawY = y;
+        if (creature.type === 'bat' && !creature.alive) {
+          // This rig hangs below its origin. Anchor the intact death pose's
+          // visible bottom to the corpse feet used by collision physics.
+          const skeleton = rig.skeleton;
+          skeleton.x = rig.poseAnchor.x;
+          skeleton.y = rig.poseAnchor.y;
+          skeleton.scaleX = 1;
+          skeleton.scaleY = -1;
+          skeleton.updateWorldTransform();
+          const offset = new spine.Vector2(), size = new spine.Vector2();
+          skeleton.getBounds(offset, size, []);
+          drawY -= offset.y + size.y - rig.poseAnchor.y;
+        }
+        rig.draw(x, drawY, creature.type === 'bat' ? -creature.facing : creature.facing, 1, 1);
       } else if (creature.type === 'bat') {
         ctx.fillStyle = '#53355f';
         ctx.beginPath();
@@ -1777,6 +1923,21 @@
         }
       }
     }
+  }
+
+  function drawHearts() {
+    ctx.save();
+    for (const heart of game.hearts || []) {
+      const x = Math.round(heart.x - game.camera.x), y = Math.round(heart.y - game.camera.y);
+      if (x < -12 || x > VIEW.width + 12 || y < -12 || y > VIEW.height + 12) continue;
+      if (heart.life < 180 && Math.floor(heart.life / 10) % 2 === 0) continue;
+      ctx.fillStyle = '#ff668a'; ctx.strokeStyle = '#542039'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, y + 5);
+      ctx.lineTo(x - 6, y - 1); ctx.lineTo(x - 6, y - 4); ctx.lineTo(x - 3, y - 6);
+      ctx.lineTo(x, y - 3); ctx.lineTo(x + 3, y - 6); ctx.lineTo(x + 6, y - 4);
+      ctx.lineTo(x + 6, y - 1); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   function drawProjectiles() {
@@ -1841,6 +2002,7 @@
     drawRespawnEffects();
     drawParticles();
     drawProjectiles();
+    drawHearts();
     drawCreatures();
     drawBot();
     drawRemotePlayers();
@@ -2029,7 +2191,13 @@
     if (event.data?.type === 'bcd:encore:init') {
       if (!trustedParent || disposed) return;
       parentOrigin = event.origin;
-      game.playerName = event.data.payload?.playerName || 'Climber';
+      const name = typeof event.data.payload?.playerName === 'string' ? event.data.payload.playerName.trim().slice(0, 32) : '';
+      game.playerName = name || 'Climber';
+      // Repeat handshakes and account renames refresh the existing room.
+      if (game.room && game.room.player.name !== game.playerName) {
+        game.room.player.name = game.playerName;
+        game.room.track();
+      }
       connectRoom(event.data.payload || {});
     }
     if (trustedParent && event.data?.type === 'bcd:encore:command' && event.data.payload?.command === 'close') {
@@ -2113,10 +2281,12 @@
     deaths: game.deaths,
     botKnockouts: game.kills,
     creatureKnockouts: game.creatureKills,
-    room: { players: game.roomCount, connected: Boolean(game.room?.connected), remotes: [...game.remotePlayers.values()].map(player => ({ id:player.id, name:player.name, x:Math.round(player.x), y:Math.round(player.y) })) },
+    hearts: (game.hearts || []).map(heart => ({ id:heart.id, x:heart.x, y:heart.y })),
+    room: { players: game.roomCount, connected: Boolean(game.room?.connected), authoritative: Boolean(game.room?.authoritative), tick: game.room?.tick ?? null, epoch: game.room?.epoch ?? null, remotes: [...game.remotePlayers.values()].map(player => ({ id:player.id, name:player.name, x:Math.round(player.x), y:Math.round(player.y), health:player.health, alive:player.alive, animation:player.animation })) },
     captureZones: CAPTURE_ZONES.map(zone => {
       const captured = game.capturedZones.get(zone.id);
-      return { id:zone.id, color:captured?.color || null, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), capturedBy:captured?.contributors?.map(member => member.name) || [] };
+      const colors = game.captureProgressByColor?.get(zone.id) ?? { [game.loadout.color]: game.captureProgress.get(zone.id) || 0 };
+      return { id:zone.id, color:captured?.color || null, progress:Math.round((game.captureProgress.get(zone.id) || 0) / 1.8), progressByColor:Object.fromEntries(Object.entries(colors).map(([color, frames]) => [color, Math.round(Math.max(0, Math.min(100, frames / 1.8)))])), contested:game.captureContested?.has(zone.id) || false, capturedBy:captured?.contributors?.map(member => member.name) || [] };
     })
   });
 
@@ -2199,6 +2369,8 @@
     // can finish streaming without leaving the canvas or input loop inert.
     setupLoadoutControls();
     resetGame();
+    if (window.parent === window && window.ENCORE_SERVER_URL) connectRoom({});
+    else if (window.parent === window) setRoomStatus('OFFLINE PRACTICE', false);
     render();
     animationFrame = requestAnimationFrame(frame);
 

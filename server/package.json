@@ -1,0 +1,9 @@
+{
+  "name": "encore-authority",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node index.mjs", "test": "node --test ../tests/authority*.test.mjs" },
+  "dependencies": { "ws": "8.21.3" }
+}
